@@ -157,4 +157,50 @@
       animation-duration: 16s !important;
     }
   }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Interview Page Animations
+     ═══════════════════════════════════════════════════════════════════════ */
+  @keyframes mic-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+
+    100% {
+      transform: scale(1.8);
+      opacity: 0;
+    }
+  }
+
+  @keyframes pulse-glow {
+    0% {
+      opacity: 0.6;
+      box-shadow: 0 0 0px var(--accent-success);
+    }
+
+    100% {
+      opacity: 1;
+      box-shadow: 0 0 8px var(--accent-success);
+    }
+  }
+
+  .waveform-bar {
+    width: 4px;
+    background: var(--accent-primary);
+    border-radius: 4px;
+    animation: waveform-bounce 1s ease-in-out infinite;
+  }
+
+  @keyframes waveform-bounce {
+
+    0%,
+    100% {
+      transform: scaleY(0.4);
+    }
+
+    50% {
+      transform: scaleY(1);
+    }
+  }
 }

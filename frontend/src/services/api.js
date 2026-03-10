@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { DUMMY_SESSIONS } from '../data/dummy';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -35,6 +34,7 @@ api.interceptors.response.use(
 export const authApi = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
+  me: () => api.get('/auth/me'),
   deleteAccount: () => api.delete('/auth/account'),
 };
 
@@ -49,40 +49,13 @@ export const resumeApi = {
 };
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
-const injectDummyReport = (session) => {
-  // Always inject beautiful mock data for completed sessions that lack it
-  if (session.status === 'completed' && !session.report) {
-    session.scores = session.scores || DUMMY_SESSIONS[0].scores;
-    session.report = DUMMY_SESSIONS[0].report;
-  }
-  return session;
-};
-
 export const sessionApi = {
-  list: async () => {
-    const res = await api.get('/sessions/');
-    if (res.data && Array.isArray(res.data)) {
-      res.data = res.data.map(injectDummyReport);
-    }
-    return res;
-  },
+  list: () => api.get('/sessions/'),
   create: (data) => api.post('/sessions/', data),
-  get: async (sessionId) => {
-    const res = await api.get(`/sessions/${sessionId}`);
-    if (res.data) res.data = injectDummyReport(res.data);
-    return res;
-  },
-  getReport: async (sessionId) => {
-    try {
-      const res = await api.get(`/sessions/${sessionId}/report`);
-      return res;
-    } catch (err) {
-      if (err.response?.status === 404) {
-        return { data: DUMMY_SESSIONS[0].report };
-      }
-      throw err;
-    }
-  },
+  get: (sessionId) => api.get(`/sessions/${sessionId}`),
+  getQuestions: (sessionId) => api.get(`/sessions/${sessionId}`), // questions are embedded in session doc
+  end: (sessionId, durationActual) => api.post(`/sessions/${sessionId}/end`, { duration_actual: durationActual }),
+  getReport: (sessionId) => api.get(`/sessions/${sessionId}/report`),
 };
 
 export default api;

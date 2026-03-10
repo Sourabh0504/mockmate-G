@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle,
 } from './ui/dialog';
@@ -12,6 +12,8 @@ import {
     User, GraduationCap, Briefcase, Code, Award,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { sessionApi } from '../services/api';
+import { Loader2 } from 'lucide-react';
 
 const content = {
     tabs: { transcript: 'Transcript', skills: 'Skills', resume: 'Resume', summary: 'Summary', export: 'Export' },
@@ -70,13 +72,13 @@ const ScoreRing = ({ score, size = 100, strokeWidth = 6, label, color = 'primary
 const SkillBar = ({ label, value, color }) => {
     const colorMap = {
         primary: 'bg-primary', secondary: 'bg-secondary', accent: 'bg-accent',
-        neonBlue: 'bg-neon-blue', neonGreen: 'bg-neon-green', neonPurple: 'bg-neon-purple',
+        neonBlue: 'bg-primary', neonGreen: 'bg-secondary', neonPurple: 'bg-accent',
     };
-    const shadowColor = color === 'neonBlue' ? 'neon-blue' : color === 'neonGreen' ? 'neon-green' : color === 'neonPurple' ? 'neon-purple' : color;
+    const shadowColor = color === 'neonBlue' ? 'primary' : color === 'neonGreen' ? 'secondary' : color === 'neonPurple' ? 'accent' : color;
 
     return (
         <div className="space-y-1.5">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center pb-1">
                 <span className="text-sm font-medium">{label}</span>
                 <span className="text-xs font-bold text-muted-foreground">{value}%</span>
             </div>
@@ -91,9 +93,47 @@ const SkillBar = ({ label, value, color }) => {
 };
 
 export default function ReportModal({ open, onClose, session }) {
-    const report = session?.report;
-    const scores = session?.scores;
-    if (!report || !scores) return null;
+    const [fetchedSession, setFetchedSession] = useState(null);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        if (open && session?.id) {
+            setLoading(true);
+            sessionApi.getReport(session.id)
+                .then(res => setFetchedSession(res.data))
+                .catch(err => console.error('Failed to load report', err))
+                .finally(() => setLoading(false));
+        } else {
+            setFetchedSession(null);
+        }
+    }, [open, session?.id]);
+
+    const displaySession = fetchedSession || session;
+
+    // Normalize the flat backend response into the expected report structure
+    const isReportLoaded = Boolean(fetchedSession || displaySession?.transcript || displaySession?.summary_text);
+
+    const report = isReportLoaded ? {
+        summary: displaySession.summary_text || displaySession.report?.summary || "No summary available.",
+        behavioral_suggestions: displaySession.ai_suggestions_behavioral || displaySession.report?.behavioral_suggestions || [],
+        technical_suggestions: displaySession.ai_suggestions_technical || displaySession.report?.technical_suggestions || [],
+        skill_scores: displaySession.scores?.skills || displaySession.report?.skill_scores || {},
+        questions: displaySession.transcript?.map((t, i) => ({
+            number: i + 1,
+            section: "Interview",
+            questionText: t.question_text,
+            userAnswer: t.raw_answer || "No answer provided.",
+            comment: t.ai_comment || "No comment.",
+            suggestion: t.ai_suggestion || "No suggestion.",
+            expectedAnswer: t.expected_answer || "No expected answer.",
+            score: t.final_score ? Math.round(t.final_score / 10) : 0
+        })) || displaySession.report?.questions || []
+    } : null;
+
+    const scores = displaySession?.scores;
+
+    // Optional loading state placeholder inside the dialog
+    if (!open) return null;
 
     const formatDate = (d) =>
         new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -109,7 +149,7 @@ export default function ReportModal({ open, onClose, session }) {
                     <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none" />
 
                     <DialogHeader className="relative p-6 pb-5">
-                        <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center justify-between gap-4">
                             <div className="space-y-2 flex-1">
                                 <div className="flex items-center gap-2">
                                     <Badge variant="outline" className="text-[10px] border-primary/30 text-primary bg-primary/5">
@@ -131,231 +171,246 @@ export default function ReportModal({ open, onClose, session }) {
                                 </div>
                             </div>
 
-                            {/* Score Ring */}
-                            <div className="flex flex-col items-center">
-                                <ScoreRing score={scores.overall} size={88} strokeWidth={5} color="primary" />
-                                <span className="text-[10px] text-muted-foreground mt-1 font-medium">Overall Score</span>
+                            {/* Overall Score Capsule */}
+                            <div className="flex flex-col justify-center bg-card/40 border border-white/10 rounded-2xl px-5 py-4 w-40 shrink-0 mr-24 relative overflow-hidden shadow-lg">
+                                <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-glow opacity-[0.04]" />
+                                <div className="relative">
+                                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-1.5">Overall Score</p>
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-3xl font-bold font-poppins leading-none">{scores.overall || 0}</span>
+                                        <span className="text-[10px] text-muted-foreground">/100</span>
+                                    </div>
+                                    <div className="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden mt-3">
+                                        <div className={`h-full rounded-full bg-gradient-to-r ${scores?.overall >= 80 ? 'from-secondary to-secondary-glow' : scores?.overall >= 60 ? 'from-primary to-primary-glow' : 'from-accent to-accent-glow'} transition-all duration-1000`} style={{ width: `${scores.overall || 0}%` }} />
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
                         {/* Mini score breakdown */}
-                        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-white/[0.06] overflow-x-auto pb-2">
-                            <ScoreRing score={scores.fluency} size={56} strokeWidth={4} label="Fluency" color="neonBlue" />
-                            <ScoreRing score={scores.content_quality} size={56} strokeWidth={4} label="Content" color="neonGreen" />
-                            <ScoreRing score={scores.confidence} size={56} strokeWidth={4} label="Confidence" color="neonPurple" />
-                        </div>
+                        {scores && (
+                            <div className="flex items-center gap-6 mt-4 pt-4 border-t border-white/[0.06] overflow-x-auto pb-2">
+                                <ScoreRing score={scores.fluency} size={56} strokeWidth={4} label="Fluency" color="neonBlue" />
+                                <ScoreRing score={scores.content_quality} size={56} strokeWidth={4} label="Content" color="neonGreen" />
+                                <ScoreRing score={scores.confidence} size={56} strokeWidth={4} label="Confidence" color="neonPurple" />
+                            </div>
+                        )}
                     </DialogHeader>
                 </div>
 
                 {/* ── Tabs ── */}
-                <Tabs defaultValue="transcript" className="flex-1 flex flex-col overflow-hidden">
-                    <div className="border-b border-white/[0.06] px-6 shrink-0">
-                        <TabsList className="bg-transparent h-11 p-0 gap-0 w-full justify-start overflow-x-auto hide-scrollbar">
-                            {[
-                                { value: 'transcript', label: content.tabs.transcript, icon: MessageSquare },
-                                { value: 'skills', label: content.tabs.skills, icon: Target },
-                                { value: 'resume', label: content.tabs.resume, icon: BookOpen },
-                                { value: 'summary', label: content.tabs.summary, icon: Lightbulb },
-                                { value: 'export', label: content.tabs.export, icon: Download },
-                            ].map(({ value, label, icon: Icon }) => (
-                                <TabsTrigger
-                                    key={value}
-                                    value={value}
-                                    className="relative rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none bg-transparent px-4 h-11 text-xs font-medium gap-1.5 transition-all data-[state=active]:text-primary"
-                                >
-                                    <Icon className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">{label}</span>
-                                </TabsTrigger>
-                            ))}
-                        </TabsList>
+                {loading ? (
+                    <div className="flex-1 flex items-center justify-center p-12 min-h-[300px]">
+                        <div className="flex flex-col items-center gap-4 text-muted-foreground">
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                            <p className="text-sm font-medium">Generating your interview report...</p>
+                        </div>
                     </div>
+                ) : !report || !scores ? (
+                    <div className="flex-1 flex items-center justify-center p-12 min-h-[300px]">
+                        <p className="text-sm text-muted-foreground">Report data is unavailable.</p>
+                    </div>
+                ) : (
+                    <Tabs defaultValue="transcript" className="flex-1 flex flex-col overflow-hidden">
+                        <div className="border-b border-white/[0.06] px-6 shrink-0">
+                            <TabsList className="bg-transparent h-12 p-0 gap-2 w-full flex overflow-x-auto hide-scrollbar">
+                                {[
+                                    { value: 'transcript', label: content.tabs.transcript, icon: MessageSquare },
+                                    { value: 'skills', label: content.tabs.skills, icon: Target },
+                                    { value: 'resume', label: content.tabs.resume, icon: BookOpen },
+                                    { value: 'summary', label: content.tabs.summary, icon: Lightbulb },
+                                    { value: 'export', label: content.tabs.export, icon: Download },
+                                ].map(({ value, label, icon: Icon }) => (
+                                    <TabsTrigger
+                                        key={value}
+                                        value={value}
+                                        className="relative flex-1 rounded-t-lg border-b-2 border-transparent data-[state=active]:border-primary hover:bg-white/5 data-[state=active]:bg-primary/5 data-[state=active]:shadow-none px-4 h-12 text-sm font-medium gap-2 transition-all data-[state=active]:text-primary flex items-center justify-center"
+                                    >
+                                        <Icon className="w-4 h-4" />
+                                        <span className="hidden sm:inline">{label}</span>
+                                    </TabsTrigger>
+                                ))}
+                            </TabsList>
+                        </div>
 
-                    <div className="p-6 flex-1 overflow-y-auto min-h-0">
-                        {/* ── Transcript Tab ── */}
-                        <TabsContent value="transcript" className="space-y-3 mt-0">
-                            {report?.questions?.map((q) => (
-                                <TranscriptQuestion key={q.number} question={q} />
-                            ))}
-                        </TabsContent>
+                        <div className="p-6 flex-1 overflow-y-auto min-h-0">
+                            {/* ── Transcript Tab ── */}
+                            <TabsContent value="transcript" className="space-y-3 mt-0">
+                                {report?.questions?.map((q) => (
+                                    <TranscriptQuestion key={q.number} question={q} />
+                                ))}
+                            </TabsContent>
 
-                        {/* ── Skills Tab ── */}
-                        <TabsContent value="skills" className="mt-0">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            {/* ── Skills Tab ── */}
+                            <TabsContent value="skills" className="mt-0">
                                 <div className="space-y-4">
                                     <h4 className="text-sm font-semibold flex items-center gap-2">
                                         <Target className="w-4 h-4 text-primary" />
                                         Skill Breakdown
                                     </h4>
-                                    {(() => {
-                                        const colors = ['primary', 'neonBlue', 'neonGreen', 'accent', 'neonPurple'];
-                                        return Object.entries(report.skill_scores || {}).map(([key, value], i) => (
-                                            <SkillBar key={key} label={key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} value={value} color={colors[i % colors.length]} />
-                                        ));
-                                    })()}
-                                </div>
-                                <div className="flex items-center justify-center">
-                                    <div className="relative">
-                                        <ScoreRing score={scores.overall} size={160} strokeWidth={8} color="primary" />
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                            <span className="text-3xl font-bold font-poppins">{scores.overall}</span>
-                                            <span className="text-[10px] text-muted-foreground">Overall</span>
-                                        </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
+                                        {(() => {
+                                            const colors = ['primary', 'neonBlue', 'neonGreen', 'accent', 'neonPurple'];
+                                            return Object.entries(report.skill_scores || {}).map(([key, value], i) => (
+                                                <SkillBar key={key} label={key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} value={value} color={colors[i % colors.length]} />
+                                            ));
+                                        })()}
                                     </div>
                                 </div>
-                            </div>
-                        </TabsContent>
+                            </TabsContent>
 
-                        {/* ── Resume Tab ── */}
-                        <TabsContent value="resume" className="space-y-2 mt-0">
-                            <p className="text-xs text-muted-foreground mb-4">
-                                This is the resume used for your interview on {formatDate(session.created_at)}.
-                            </p>
-                            <ResumeSection title={content.resumeSections.personalInfo} icon={User} defaultOpen>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                    {[
-                                        [content.personalInfoLabels.name, DUMMY_RESUME.personal_info.name],
-                                        [content.personalInfoLabels.email, DUMMY_RESUME.personal_info.email],
-                                        [content.personalInfoLabels.phone, DUMMY_RESUME.personal_info.phone],
-                                        [content.personalInfoLabels.location, DUMMY_RESUME.personal_info.location],
-                                    ].map(([label, val]) => (
-                                        <div key={label} className="bg-muted/20 rounded-lg p-2.5">
-                                            <span className="text-[10px] text-muted-foreground block">{label}</span>
-                                            <span className="text-sm font-medium">{val}</span>
+                            {/* ── Resume Tab ── */}
+                            <TabsContent value="resume" className="space-y-2 mt-0">
+                                <p className="text-xs text-muted-foreground mb-4">
+                                    This is the resume used for your interview on {formatDate(displaySession.created_at)}.
+                                </p>
+                                <ResumeSection title={content.resumeSections.personalInfo} icon={User} defaultOpen>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                        {[
+                                            [content.personalInfoLabels.name, DUMMY_RESUME.personal_info.name],
+                                            [content.personalInfoLabels.email, DUMMY_RESUME.personal_info.email],
+                                            [content.personalInfoLabels.phone, DUMMY_RESUME.personal_info.phone],
+                                            [content.personalInfoLabels.location, DUMMY_RESUME.personal_info.location],
+                                        ].map(([label, val]) => (
+                                            <div key={label} className="bg-muted/20 rounded-lg p-2.5">
+                                                <span className="text-[10px] text-muted-foreground block">{label}</span>
+                                                <span className="text-sm font-medium">{val}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </ResumeSection>
+                                <ResumeSection title={content.resumeSections.education} icon={GraduationCap}>
+                                    {DUMMY_RESUME.education.map((ed, i) => (
+                                        <div key={i} className="bg-muted/20 rounded-lg p-3 text-sm">
+                                            <div className="font-medium">{ed.degree}</div>
+                                            <div className="text-xs text-muted-foreground">{ed.institution} · {ed.year}{ed.gpa && ` · GPA: ${ed.gpa}`}</div>
                                         </div>
                                     ))}
-                                </div>
-                            </ResumeSection>
-                            <ResumeSection title={content.resumeSections.education} icon={GraduationCap}>
-                                {DUMMY_RESUME.education.map((ed, i) => (
-                                    <div key={i} className="bg-muted/20 rounded-lg p-3 text-sm">
-                                        <div className="font-medium">{ed.degree}</div>
-                                        <div className="text-xs text-muted-foreground">{ed.institution} · {ed.year}{ed.gpa && ` · GPA: ${ed.gpa}`}</div>
+                                </ResumeSection>
+                                <ResumeSection title={content.resumeSections.experience} icon={Briefcase}>
+                                    {DUMMY_RESUME.experience.map((ex, i) => (
+                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-1.5">
+                                            <div className="text-sm font-medium">{ex.title} <span className="text-muted-foreground font-normal">at {ex.company}</span></div>
+                                            <div className="text-[10px] text-muted-foreground">{ex.duration}</div>
+                                            <ul className="space-y-0.5 mt-2">
+                                                {ex.bullets.map((b, j) => (
+                                                    <li key={j} className="text-xs text-muted-foreground flex gap-1.5">
+                                                        <span className="text-primary mt-1 shrink-0">•</span>{b}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                </ResumeSection>
+                                <ResumeSection title={content.resumeSections.projects} icon={Code}>
+                                    {DUMMY_RESUME.projects.map((p, i) => (
+                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-2">
+                                            <div className="text-sm font-medium">{p.name}</div>
+                                            <div className="text-xs text-muted-foreground">{p.description}</div>
+                                            <div className="flex flex-wrap gap-1">
+                                                {p.tech_stack.map((t) => (
+                                                    <Badge key={t} variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">{t}</Badge>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </ResumeSection>
+                                <ResumeSection title={content.resumeSections.skills} icon={Award}>
+                                    <div className="space-y-2">
+                                        {Object.entries(DUMMY_RESUME.skills).map(([cat, skills]) => (
+                                            <div key={cat} className="bg-muted/20 rounded-lg p-3">
+                                                <div className="text-xs font-semibold text-primary mb-1.5">{cat}</div>
+                                                <div className="flex flex-wrap gap-1">
+                                                    {skills.map((s) => <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>)}
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
-                                ))}
-                            </ResumeSection>
-                            <ResumeSection title={content.resumeSections.experience} icon={Briefcase}>
-                                {DUMMY_RESUME.experience.map((ex, i) => (
-                                    <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-1.5">
-                                        <div className="text-sm font-medium">{ex.title} <span className="text-muted-foreground font-normal">at {ex.company}</span></div>
-                                        <div className="text-[10px] text-muted-foreground">{ex.duration}</div>
-                                        <ul className="space-y-0.5 mt-2">
-                                            {ex.bullets.map((b, j) => (
-                                                <li key={j} className="text-xs text-muted-foreground flex gap-1.5">
-                                                    <span className="text-primary mt-1 shrink-0">•</span>{b}
+                                </ResumeSection>
+                            </TabsContent>
+
+                            {/* ── Summary Tab ── */}
+                            <TabsContent value="summary" className="space-y-6 mt-0">
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+                                    <ScoreRing score={scores.overall} size={120} strokeWidth={7} color="primary" />
+                                    <div className="flex-1 space-y-1 text-center sm:text-left text-balance">
+                                        <div className={`text-3xl font-bold font-poppins ${getScoreColor(scores.overall)}`}>
+                                            {scores.overall >= 80 ? 'Excellent' : scores.overall >= 60 ? 'Good' : scores.overall >= 40 ? 'Fair' : 'Needs Work'}
+                                        </div>
+                                        <p className="text-sm text-muted-foreground leading-relaxed">{report.summary}</p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="bg-neon-green/5 border border-neon-green/10 rounded-xl p-4 space-y-3">
+                                        <h4 className="font-semibold text-sm flex items-center gap-2">
+                                            <Lightbulb className="w-4 h-4 text-neon-green" />
+                                            {content.behavioralSuggestions}
+                                        </h4>
+                                        <ul className="space-y-2">
+                                            {report.behavioral_suggestions?.map((s, i) => (
+                                                <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                                                    <span className="text-neon-green mt-0.5 shrink-0">→</span>{s}
                                                 </li>
                                             ))}
                                         </ul>
                                     </div>
-                                ))}
-                            </ResumeSection>
-                            <ResumeSection title={content.resumeSections.projects} icon={Code}>
-                                {DUMMY_RESUME.projects.map((p, i) => (
-                                    <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-2">
-                                        <div className="text-sm font-medium">{p.name}</div>
-                                        <div className="text-xs text-muted-foreground">{p.description}</div>
-                                        <div className="flex flex-wrap gap-1">
-                                            {p.tech_stack.map((t) => (
-                                                <Badge key={t} variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">{t}</Badge>
+                                    <div className="bg-primary/5 border border-primary/10 rounded-xl p-4 space-y-3">
+                                        <h4 className="font-semibold text-sm flex items-center gap-2">
+                                            <Code className="w-4 h-4 text-primary" />
+                                            {content.technicalSuggestions}
+                                        </h4>
+                                        <ul className="space-y-2">
+                                            {report.technical_suggestions?.map((s, i) => (
+                                                <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                                                    <span className="text-primary mt-0.5 shrink-0">→</span>{s}
+                                                </li>
                                             ))}
-                                        </div>
+                                        </ul>
                                     </div>
-                                ))}
-                            </ResumeSection>
-                            <ResumeSection title={content.resumeSections.skills} icon={Award}>
-                                <div className="space-y-2">
-                                    {Object.entries(DUMMY_RESUME.skills).map(([cat, skills]) => (
-                                        <div key={cat} className="bg-muted/20 rounded-lg p-3">
-                                            <div className="text-xs font-semibold text-primary mb-1.5">{cat}</div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {skills.map((s) => <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>)}
-                                            </div>
-                                        </div>
-                                    ))}
                                 </div>
-                            </ResumeSection>
-                        </TabsContent>
+                            </TabsContent>
 
-                        {/* ── Summary Tab ── */}
-                        <TabsContent value="summary" className="space-y-6 mt-0">
-                            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-                                <ScoreRing score={scores.overall} size={120} strokeWidth={7} color="primary" />
-                                <div className="flex-1 space-y-1 text-center sm:text-left text-balance">
-                                    <div className={`text-3xl font-bold font-poppins ${getScoreColor(scores.overall)}`}>
-                                        {scores.overall >= 80 ? 'Excellent' : scores.overall >= 60 ? 'Good' : scores.overall >= 40 ? 'Fair' : 'Needs Work'}
+                            {/* ── Export Tab ── */}
+                            <TabsContent value="export" className="mt-0">
+                                <div className="flex flex-col items-center py-10 space-y-6">
+                                    <div className="text-center space-y-2">
+                                        <Trophy className="w-10 h-10 text-primary mx-auto mb-4" />
+                                        <h3 className="font-poppins font-semibold text-lg">Export Your Report</h3>
+                                        <p className="text-sm text-muted-foreground max-w-sm">Download your interview performance report to share or review offline.</p>
                                     </div>
-                                    <p className="text-sm text-muted-foreground leading-relaxed">{report.summary}</p>
+                                    <div className="flex flex-wrap justify-center gap-3">
+                                        <Button
+                                            variant="outline"
+                                            size="lg"
+                                            className="group border-white/10 hover:border-primary/30 hover:bg-primary/5 transition-all w-full sm:w-auto"
+                                            onClick={() => alert('PDF export coming soon!')}
+                                        >
+                                            <FileDown className="w-5 h-5 mr-2 text-primary group-hover:scale-110 transition-transform" />
+                                            {content.downloadPdf}
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="lg"
+                                            className="group border-white/10 hover:border-neon-green/30 hover:bg-neon-green/5 transition-all w-full sm:w-auto"
+                                            onClick={() => {
+                                                const blob = new Blob([JSON.stringify({ session: displaySession, report }, null, 2)], { type: 'application/json' });
+                                                const url = URL.createObjectURL(blob);
+                                                const a = document.createElement('a');
+                                                a.href = url;
+                                                a.download = `report_${displaySession.id}.json`;
+                                                a.click();
+                                            }}
+                                        >
+                                            <Download className="w-5 h-5 mr-2 text-neon-green group-hover:scale-110 transition-transform" />
+                                            {content.downloadJson}
+                                        </Button>
+                                    </div>
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div className="bg-neon-green/5 border border-neon-green/10 rounded-xl p-4 space-y-3">
-                                    <h4 className="font-semibold text-sm flex items-center gap-2">
-                                        <Lightbulb className="w-4 h-4 text-neon-green" />
-                                        {content.behavioralSuggestions}
-                                    </h4>
-                                    <ul className="space-y-2">
-                                        {report.behavioral_suggestions?.map((s, i) => (
-                                            <li key={i} className="text-xs text-muted-foreground flex gap-2">
-                                                <span className="text-neon-green mt-0.5 shrink-0">→</span>{s}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                                <div className="bg-primary/5 border border-primary/10 rounded-xl p-4 space-y-3">
-                                    <h4 className="font-semibold text-sm flex items-center gap-2">
-                                        <Code className="w-4 h-4 text-primary" />
-                                        {content.technicalSuggestions}
-                                    </h4>
-                                    <ul className="space-y-2">
-                                        {report.technical_suggestions?.map((s, i) => (
-                                            <li key={i} className="text-xs text-muted-foreground flex gap-2">
-                                                <span className="text-primary mt-0.5 shrink-0">→</span>{s}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            </div>
-                        </TabsContent>
-
-                        {/* ── Export Tab ── */}
-                        <TabsContent value="export" className="mt-0">
-                            <div className="flex flex-col items-center py-10 space-y-6">
-                                <div className="text-center space-y-2">
-                                    <Trophy className="w-10 h-10 text-primary mx-auto mb-4" />
-                                    <h3 className="font-poppins font-semibold text-lg">Export Your Report</h3>
-                                    <p className="text-sm text-muted-foreground max-w-sm">Download your interview performance report to share or review offline.</p>
-                                </div>
-                                <div className="flex flex-wrap justify-center gap-3">
-                                    <Button
-                                        variant="outline"
-                                        size="lg"
-                                        className="group border-white/10 hover:border-primary/30 hover:bg-primary/5 transition-all w-full sm:w-auto"
-                                        onClick={() => alert('PDF export coming soon!')}
-                                    >
-                                        <FileDown className="w-5 h-5 mr-2 text-primary group-hover:scale-110 transition-transform" />
-                                        {content.downloadPdf}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="lg"
-                                        className="group border-white/10 hover:border-neon-green/30 hover:bg-neon-green/5 transition-all w-full sm:w-auto"
-                                        onClick={() => {
-                                            const blob = new Blob([JSON.stringify({ session, report }, null, 2)], { type: 'application/json' });
-                                            const url = URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = `report_${session.id}.json`;
-                                            a.click();
-                                        }}
-                                    >
-                                        <Download className="w-5 h-5 mr-2 text-neon-green group-hover:scale-110 transition-transform" />
-                                        {content.downloadJson}
-                                    </Button>
-                                </div>
-                            </div>
-                        </TabsContent>
-                    </div>
-                </Tabs>
+                            </TabsContent>
+                        </div>
+                    </Tabs>
+                )}
             </DialogContent>
         </Dialog>
     );

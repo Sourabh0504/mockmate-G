@@ -63,6 +63,7 @@ class InterruptionPoint(BaseModel):
 
 class SessionCreate(BaseModel):
     role: str = Field(..., min_length=1, max_length=200)
+    company: Optional[str] = None
     jd_text: str = Field(..., min_length=50)
     resume_id: str
     difficulty: Literal["Easy", "Moderate", "Hard"]
@@ -72,6 +73,7 @@ class SessionCreate(BaseModel):
 class SessionStatus(BaseModel):
     id: str
     role: str
+    company: Optional[str] = None
     status: str
     difficulty: str
     duration: int
@@ -86,6 +88,7 @@ class SessionStatus(BaseModel):
 class SessionReport(BaseModel):
     id: str
     role: str
+    company: Optional[str] = None
     jd_text: str
     difficulty: str
     duration_selected: int

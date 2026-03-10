@@ -3,6 +3,7 @@
  * Uses Tailwind + shared UI primitives (Card, Button, etc.)
  */
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/layout/Navigation';
 import Footer from '../components/layout/Footer';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -16,23 +17,24 @@ import {
     Trophy, Star, Calendar, ArrowRight, Lightbulb, Plus, Sparkles, Flame, Clock,
 } from 'lucide-react';
 
-// ── Reusable quick stat strip card (exact Lovable) ──
+// ── Reusable quick stat strip card ──
 function QuickStat({ icon: Icon, value, label, colorClass }) {
     return (
-        <div className="flex items-center gap-3 bg-card/60 backdrop-blur-lg rounded-xl border border-white/10 p-3 sm:p-4">
-            <div className={`w-9 h-9 rounded-lg ${colorClass} flex items-center justify-center shrink-0`}>
+        <div className="flex items-center gap-2 sm:gap-2.5 bg-card/60 backdrop-blur-lg rounded-xl border border-white/10 p-2 sm:p-2.5">
+            <div className={`w-8 h-8 rounded-lg ${colorClass} flex items-center justify-center shrink-0`}>
                 <Icon className="w-4 h-4" />
             </div>
-            <div>
-                <p className="text-lg sm:text-xl font-bold font-poppins">{value}</p>
-                <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
+            <div className="min-w-0">
+                <p className="text-base sm:text-lg font-bold font-poppins leading-none truncate">{value}</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 leading-tight truncate">{label}</p>
             </div>
         </div>
     );
 }
 
 export default function DashboardPage() {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
 
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -91,6 +93,7 @@ export default function DashboardPage() {
         setTimeout(fetchSessions, 3000);
     };
 
+    // eslint-disable-next-line no-unused-vars
     const handleLogout = () => { logout(); navigate('/'); };
 
     const achievementIcons = [Star, Award, Calendar];
@@ -135,44 +138,9 @@ export default function DashboardPage() {
                         </Button>
                     </div>
 
-                    {/* ── Quick stats strip ── */}
-                    <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-8">
-                        <QuickStat icon={Flame} value={completedSessions.length} label="Sessions Done" colorClass="bg-primary/15 text-primary" />
-                        <QuickStat icon={BarChart3} value={avgScore || '—'} label="Average Score" colorClass="bg-secondary/15 text-secondary" />
-                        <QuickStat icon={Clock} value={`${totalMinutes}m`} label="Total Practice" colorClass="bg-accent/15 text-accent" />
-                    </div>
 
-                    {/* ── Score cards (only when scores exist) ── */}
-                    {hasScores && (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
-                            {metrics.map((metric, i) => (
-                                <Card key={i} className="group relative overflow-hidden animate-slide-up" style={{ animationDelay: `${i * 0.08}s` }}>
-                                    <div className={`absolute inset-0 bg-gradient-to-br ${metric.gradient} opacity-[0.06] group-hover:opacity-[0.12] transition-opacity duration-500`} />
-                                    <CardContent className="p-4 sm:p-5 relative">
-                                        <div className="flex items-start justify-between">
-                                            <div className="space-y-1.5">
-                                                <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wider">{metric.title}</p>
-                                                <div className="flex items-baseline gap-1.5">
-                                                    <span className="text-2xl sm:text-3xl font-bold font-poppins">{metric.value}</span>
-                                                    <span className="text-xs text-muted-foreground">/100</span>
-                                                </div>
-                                                <div className={`flex items-center text-[10px] sm:text-xs ${metric.change > 0 ? 'text-secondary' : 'text-destructive'}`}>
-                                                    {metric.change > 0 ? <TrendingUp className="w-3 h-3 mr-0.5" /> : <TrendingDown className="w-3 h-3 mr-0.5" />}
-                                                    {Math.abs(metric.change)} from last
-                                                </div>
-                                            </div>
-                                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${metric.gradient} flex items-center justify-center opacity-80`}>
-                                                <metric.icon className="w-5 h-5 text-white" />
-                                            </div>
-                                        </div>
-                                        <div className="mt-3 h-1 rounded-full bg-muted overflow-hidden">
-                                            <div className={`h-full rounded-full bg-gradient-to-r ${metric.gradient} transition-all duration-1000`} style={{ width: `${metric.value}%` }} />
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    )}
+
+
 
                     {/* ── Two-column layout: sessions + sidebar ── */}
                     <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8">
@@ -211,6 +179,62 @@ export default function DashboardPage() {
                         {/* Sidebar — sticky on desktop */}
                         <div className="lg:col-span-2 space-y-4 lg:sticky lg:top-20 lg:self-start">
 
+                            {/* ── Quick stats strip (Moved to sidebar) ── */}
+                            <div className="grid grid-cols-3 gap-2 animate-slide-up" style={{ animationDelay: '0.2s' }}>
+                                <QuickStat icon={Flame} value={completedSessions.length} label="Sessions" colorClass="bg-primary/15 text-primary" />
+                                <QuickStat icon={BarChart3} value={avgScore || '—'} label="Avg Score" colorClass="bg-secondary/15 text-secondary" />
+                                <QuickStat icon={Clock} value={`${totalMinutes}m`} label="Practice" colorClass="bg-accent/15 text-accent" />
+                            </div>
+
+                            {/* ── Score cards (2x2 grid in sidebar) ── */}
+                            {hasScores && (
+                                <Card className="animate-slide-up" style={{ animationDelay: '0.25s' }}>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="flex items-center gap-2 text-sm">
+                                            <Target className="w-4 h-4 text-primary" /> Overall Performance
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {metrics.map((metric, i) => (
+                                                <Card key={i} className="group relative overflow-hidden bg-card/40 border-white/5">
+                                                    <div className={`absolute inset-0 bg-gradient-to-br ${metric.gradient} opacity-[0.04] group-hover:opacity-[0.1] transition-opacity duration-500`} />
+                                                    <div className="p-3 relative">
+                                                        <div className="flex items-center gap-3">
+                                                            {/* Left side: Big Logo */}
+                                                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${metric.gradient} flex items-center justify-center opacity-80 shrink-0`}>
+                                                                <metric.icon className="w-5 h-5 text-white" />
+                                                            </div>
+
+                                                            {/* Right side: Title, Score, Trend */}
+                                                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                                                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold line-clamp-1 mb-1">{metric.title}</p>
+
+                                                                <div className="flex items-baseline justify-between gap-2">
+                                                                    <div className="flex items-baseline gap-1">
+                                                                        <span className="text-xl sm:text-2xl font-bold font-poppins leading-none">{metric.value}</span>
+                                                                        <span className="text-[10px] text-muted-foreground">/100</span>
+                                                                    </div>
+                                                                    <div className={`flex items-center text-[10px] font-medium ${metric.change > 0 ? 'text-secondary' : 'text-destructive'}`}>
+                                                                        {metric.change > 0 ? <TrendingUp className="w-2.5 h-2.5 mr-0.5" /> : <TrendingDown className="w-2.5 h-2.5 mr-0.5" />}
+                                                                        {Math.abs(metric.change)}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Bottom: Progress Bar spanning full width */}
+                                                        <div className="h-1 w-full rounded-full bg-muted/50 overflow-hidden mt-3">
+                                                            <div className={`h-full rounded-full bg-gradient-to-r ${metric.gradient} transition-all duration-1000`} style={{ width: `${metric.value}%` }} />
+                                                        </div>
+                                                    </div>
+                                                </Card>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+
                             {/* Skill analysis */}
                             {skillScores && (
                                 <Card className="animate-slide-up" style={{ animationDelay: '0.3s' }}>
@@ -221,11 +245,11 @@ export default function DashboardPage() {
                                     </CardHeader>
                                     <CardContent className="space-y-3">
                                         {[
-                                            { label: 'Technical', value: skillScores.technical_knowledge, color: 'bg-primary' },
-                                            { label: 'Communication', value: skillScores.communication, color: 'bg-secondary' },
-                                            { label: 'Problem Solving', value: skillScores.problem_solving, color: 'bg-accent' },
-                                            { label: 'Leadership', value: skillScores.leadership, color: 'bg-primary' },
-                                            { label: 'Cultural Fit', value: skillScores.cultural_fit, color: 'bg-secondary' },
+                                            { label: 'Technical', value: skillScores.technological_knowledge || skillScores.technical_knowledge || 0, color: 'bg-primary' },
+                                            { label: 'Communication', value: skillScores.communication || 0, color: 'bg-secondary' },
+                                            { label: 'Problem Solving', value: skillScores.problem_solving || 0, color: 'bg-accent' },
+                                            { label: 'Leadership', value: skillScores.leadership || 0, color: 'bg-primary' },
+                                            { label: 'Cultural Fit', value: skillScores.cultural_fit || 0, color: 'bg-secondary' },
                                         ].map(skill => (
                                             <div key={skill.label} className="space-y-1">
                                                 <div className="flex justify-between text-xs">

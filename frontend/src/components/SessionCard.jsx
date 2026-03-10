@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
-import { Clock, AlertTriangle, Loader2, Play, FileText, RotateCcw, ChevronRight, Mic, Brain, Target } from 'lucide-react';
+import { Clock, AlertTriangle, Loader2, Play, FileText, RotateCcw, ChevronRight, Mic, Brain, Target, Building2 } from 'lucide-react';
 import RulesModal from './RulesModal';
 import ReportModal from './ReportModal';
 
@@ -71,7 +71,13 @@ export default function SessionCard({ session }) {
                     <div className="flex items-start justify-between gap-4">
                         <div className="space-y-2.5 min-w-0 flex-1">
                             <h3 className="font-semibold text-base sm:text-lg truncate leading-tight">{session.role}</h3>
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap text-sm">
+                                {session.company && (
+                                    <span className="font-medium text-muted-foreground mr-1 flex items-center gap-1.5 whitespace-nowrap">
+                                        <Building2 className="w-3.5 h-3.5 opacity-70" />
+                                        {session.company}
+                                    </span>
+                                )}
                                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-medium ${statusBg}`}>
                                     <span className={`w-[5px] h-[5px] rounded-full ${dotClass}`} />
                                     {statusLabel}

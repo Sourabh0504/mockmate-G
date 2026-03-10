@@ -7,7 +7,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { sessionApi } from '../services/api';
-import Footer from '../components/layout/Footer';
+import { Phone, AlertCircle } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { Button } from '../components/ui/button';
 
 const DUMMY_QUESTIONS = [
     'Please introduce yourself and walk me through your background.',
@@ -266,46 +268,67 @@ export default function InterviewPage() {
             {/* ── Floating control bar ── */}
             <div style={styles.controlBar}>
                 <div style={styles.controlInner}>
-                    {/* Mic indicator */}
+                    {/* Mic indicator with animation */}
                     <div style={styles.micIndicator}>
-                        {state === 'listening'
-                            ? <span style={{ fontSize: 20 }}>🎤</span>
-                            : <span style={{ fontSize: 20, opacity: 0.4 }}>🔇</span>
-                        }
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44 }}>
+                            {/* Pulsing rings — only when listening */}
+                            {state === 'listening' && (
+                                <>
+                                    <span style={styles.micRing1} />
+                                    <span style={styles.micRing2} />
+                                </>
+                            )}
+                            {/* Mic SVG icon */}
+                            <svg
+                                width="22" height="22" viewBox="0 0 24 24" fill="none"
+                                stroke={state === 'listening' ? 'var(--accent-success)' : 'rgba(255,255,255,0.3)'}
+                                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                style={{ position: 'relative', zIndex: 1, transition: 'stroke 0.3s ease' }}
+                            >
+                                <rect x="9" y="2" width="6" height="11" rx="3" />
+                                <path d="M5 10a7 7 0 0 0 14 0" />
+                                <line x1="12" y1="19" x2="12" y2="22" />
+                                <line x1="8" y1="22" x2="16" y2="22" />
+                            </svg>
+                        </div>
                     </div>
                     <div style={styles.controlDivider} />
-                    {/* End call */}
+                    {/* End call — proper SVG phone-down icon */}
                     <button
                         style={styles.endCallBtn}
                         onClick={() => setShowEndDialog(true)}
                         title="End Interview"
                     >
-                        📵
+                        <Phone color="white" fill="white" size={24} style={{ transform: 'rotate(135deg)' }} />
                     </button>
                 </div>
             </div>
 
             {/* ── End call confirm dialog ── */}
-            {showEndDialog && (
-                <div style={styles.dialogOverlay}>
-                    <div style={styles.dialog}>
-                        <h3 style={styles.dialogTitle}>End this interview?</h3>
-                        <p style={styles.dialogBody}>
-                            This action is final. Your interview cannot be resumed, but partial results will be evaluated.
-                        </p>
-                        <div style={styles.dialogFooter}>
-                            <button className="btn btn-ghost" onClick={() => setShowEndDialog(false)} style={{ fontSize: 13 }}>
-                                Cancel
-                            </button>
-                            <button className="btn btn-danger" onClick={handleEndInterview} style={{ fontSize: 13 }}>
-                                Yes, End Interview
-                            </button>
-                        </div>
+            <Dialog open={showEndDialog} onOpenChange={setShowEndDialog}>
+                <DialogContent hideCloseButton className="sm:max-w-[600px] w-[95vw] bg-card/95 backdrop-blur-xl border-white/10 p-6 sm:p-8 shadow-2xl rounded-2xl">
+                    <DialogHeader className="space-y-4 mb-8">
+                        <DialogTitle className="flex flex-col items-center gap-4 text-destructive font-poppins text-xl text-center">
+                            <div className="w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center">
+                                <AlertCircle className="w-7 h-7" />
+                            </div>
+                            End this interview?
+                        </DialogTitle>
+                        <DialogDescription className="text-center text-[15px] text-muted-foreground/90 leading-relaxed px-4">
+                            This action is final. Your interview cannot be resumed, but partial results will be evaluated and saved to your dashboard.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex justify-center gap-3">
+                        <Button variant="outline" className="flex-1 border-green-500/50 text-green-500 hover:bg-green-500/10 hover:text-green-400 hover:border-green-500 transition-colors" onClick={() => setShowEndDialog(false)}>
+                            Continue Interview
+                        </Button>
+                        <Button variant="destructive" className="flex-1 bg-red-700 hover:bg-red-800 shadow-lg shadow-red-900/20" onClick={handleEndInterview}>
+                            Yes, End Interview
+                        </Button>
                     </div>
-                </div>
-            )}
+                </DialogContent>
+            </Dialog>
 
-            <Footer />
 
             {/* ── Network lost overlay ── */}
             {networkLost && (
@@ -354,7 +377,7 @@ const styles = {
         background: 'rgba(22,22,31,0.7)',
         backdropFilter: 'blur(16px)',
         border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 'var(--radius-lg)',
+        borderRadius: 24,
         padding: '12px 18px',
         minHeight: 52,
         display: 'flex',
@@ -368,7 +391,7 @@ const styles = {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
     },
     questionText: {
-        fontSize: 15, color: 'var(--text-primary)', lineHeight: 1.5, fontWeight: 500, flex: 1,
+        fontSize: 18, color: 'var(--text-primary)', lineHeight: 1.5, fontWeight: 500, flex: 1, textAlign: 'center',
     },
     timerChip: { flexShrink: 0 },
     videoArea: {
@@ -380,7 +403,7 @@ const styles = {
     },
     videoCard: {
         flex: 1,
-        borderRadius: 'var(--radius-lg)',
+        borderRadius: 24,
         overflow: 'hidden',
         background: '#000',
         border: '1px solid rgba(255,255,255,0.08)',
@@ -388,7 +411,7 @@ const styles = {
     },
     avatarCard: {
         flex: 1,
-        borderRadius: 'var(--radius-lg)',
+        borderRadius: 24,
         border: '1px solid rgba(255,255,255,0.08)',
         background: 'rgba(22,22,31,0.5)',
         display: 'flex',
@@ -466,22 +489,35 @@ const styles = {
     },
     controlInner: {
         display: 'flex', alignItems: 'center', gap: 20,
-        background: 'rgba(22,22,31,0.85)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 'var(--radius-xl)',
+        background: 'rgba(255, 255, 255, 0.1)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: 100,
         padding: '12px 24px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
     },
     micIndicator: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44 },
+    micRing1: {
+        position: 'absolute',
+        width: 38, height: 38, borderRadius: '50%',
+        border: '1.5px solid rgba(46,213,115,0.5)',
+        animation: 'mic-pulse 1.4s ease-out infinite',
+    },
+    micRing2: {
+        position: 'absolute',
+        width: 52, height: 52, borderRadius: '50%',
+        border: '1.5px solid rgba(46,213,115,0.25)',
+        animation: 'mic-pulse 1.4s ease-out 0.5s infinite',
+    },
     controlDivider: { width: 1, height: 32, background: 'rgba(255,255,255,0.1)' },
     endCallBtn: {
         width: 52, height: 52, borderRadius: '50%',
-        background: 'var(--accent-danger)',
+        background: '#ef4444',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 22,
-        boxShadow: '0 4px 16px rgba(255,71,87,0.4)',
-        transition: 'var(--transition)',
+        boxShadow: '0 4px 16px rgba(239, 68, 68, 0.4)',
+        transition: 'all 0.2s ease',
         cursor: 'pointer',
         border: 'none',
     },

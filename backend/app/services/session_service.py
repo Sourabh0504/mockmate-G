@@ -66,6 +66,7 @@ async def create_session(data: SessionCreate, user_id: str, db, background_tasks
     session_doc = {
         "user_id": uid,
         "role": data.role,                        # Stored as label only — AI never uses this
+        "company": data.company,                  # Optional tag for tracking
         "jd_text": data.jd_text,
         "jd_quality_score": None,
         "jd_quality_warning": False,
@@ -427,6 +428,7 @@ def _format_session_status(doc: dict) -> dict:
     return {
         "id": str(doc["_id"]),
         "role": doc.get("role"),
+        "company": doc.get("company"),
         "status": doc.get("status"),
         "difficulty": doc.get("difficulty"),
         "duration_selected": doc.get("duration_selected"),
@@ -448,6 +450,7 @@ def _format_session_report(doc: dict) -> dict:
     return {
         "id": str(doc["_id"]),
         "role": doc.get("role"),
+        "company": doc.get("company"),
         "jd_text": doc.get("jd_text"),
         "difficulty": doc.get("difficulty"),
         "duration_selected": doc.get("duration_selected"),

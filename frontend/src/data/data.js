@@ -47,7 +47,7 @@ export const footer = {
         { name: "About", path: "/about" },
         { name: "Contact", path: "/contact" },
     ],
-    copyright: "© 2024 MockMate AI. All rights reserved. Built with ❤️ for better interviews.",
+    copyright: `© ${new Date().getFullYear()} MockMate AI. All rights reserved. Built with ❤️ for better interviews.`,
 };
 
 // ── HOME PAGE (/') ──────────────────────────────────────────────────────────────

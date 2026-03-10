@@ -5,7 +5,7 @@ Routes are thin — all logic delegated to auth_service.
 """
 
 from fastapi import APIRouter, Depends
-from app.models.user import UserCreate, UserLogin, TokenResponse
+from app.models.user import UserCreate, UserLogin, UserResponse, TokenResponse
 from app.services import auth_service
 from app.middleware.auth_middleware import get_current_user
 from app.database import get_db
@@ -23,6 +23,17 @@ async def register(data: UserCreate, db=Depends(get_db)):
 async def login(data: UserLogin, db=Depends(get_db)):
     """Login and receive JWT access token."""
     return await auth_service.login_user(data, db)
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: dict = Depends(get_current_user)):
+    """Return the current authenticated user's profile."""
+    return UserResponse(
+        id=str(current_user["_id"]),
+        name=current_user["name"],
+        email=current_user["email"],
+        created_at=current_user["created_at"],
+    )
 
 
 @router.delete("/account", status_code=200)
