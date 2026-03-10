@@ -2,7 +2,7 @@
 .DS_Store
 Thumbs.db
 
-# Environments (Confidential configuration files)
+# Environment files
 .env
 .env.local
 .env.*.local
@@ -10,8 +10,19 @@ Thumbs.db
 .env.test
 .env.production
 .env.staging
+backend/.env
+frontend/.env
 
-# Backend (Python)
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,10 +35,10 @@ ENV/
 env/
 venv.bak/
 
-# Python packaging and testing
+# Python packaging / testing
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -55,21 +66,13 @@ coverage.xml
 *.py,cover
 .hypothesis/
 
-# Frontend (Node)
+# Node / Frontend
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-dist/
 dist-ssr/
 .local
-
-# Vite
 *.local
 
-# Editor directories and files
+# Editor / IDE
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
