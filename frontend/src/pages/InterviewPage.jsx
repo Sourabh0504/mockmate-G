@@ -1,63 +1,67 @@
 /**
  * InterviewPage.jsx — Full-screen AI interview with webcam, AI avatar, and question flow.
- * Adapted from Lovable's Interview.tsx. WebSocket integration is stubbed — real WS
- * is handled by useInterviewWS.js (future task). UI is fully functional for demos.
+ * Uses useInterviewWS hook for real-time WebSocket communication with the backend.
+ * Uses useAudioCapture for microphone PCM streaming and useAudioPlayback for AI TTS.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sessionApi } from '../services/api';
+import useInterviewWS from '../hooks/useInterviewWS';
+import useAudioCapture from '../hooks/useAudioCapture';
+import useAudioPlayback from '../hooks/useAudioPlayback';
 import { Phone, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
-
-const DUMMY_QUESTIONS = [
-    'Please introduce yourself and walk me through your background.',
-    'How would you approach designing a scalable API architecture?',
-    'Describe a challenging technical problem you solved recently.',
-    'How do you handle disagreements with team members on technical decisions?',
-    "What's your approach to testing and code quality in a React application?",
-];
-
-/** Interview state machine */
-// 'connecting' → 'greeting' → 'waiting' → 'listening' → 'transitioning' → 'ended'
 
 export default function InterviewPage() {
     const { session_id } = useParams();
     const navigate = useNavigate();
     const { user } = useAuth();
 
-    const [state, setState] = useState('connecting');
-    const [questionIndex, setQuestionIndex] = useState(0);
-    const [currentQuestion, setCurrentQuestion] = useState('');
-    const [countdown, setCountdown] = useState(10);
-    const [elapsed, setElapsed] = useState(0);
-    const [aiSpeaking, setAiSpeaking] = useState(false);
-    const [pace, setPace] = useState('good'); // good | too_fast | too_slow
+    // ── WebSocket hook — all interview state comes from here ──
+    const ws = useInterviewWS(session_id);
+    const {
+        state, question: currentQuestion, questionIndex, totalQuestions,
+        countdown, elapsed, aiSpeaking, pace, connected, error: wsError,
+        endReason, endText,
+        notifySpeaking, sendText, sendAudioChunk, endInterview: wsEndInterview, requestRepeat,
+        onAudioDataRef,
+    } = ws;
+
+    // ── Audio capture (mic → PCM → WebSocket) ──
+    const handleAudioChunk = useCallback((pcmBuffer) => {
+        // Convert ArrayBuffer to base64
+        const bytes = new Uint8Array(pcmBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        const b64 = btoa(binary);
+        sendAudioChunk(b64);
+    }, [sendAudioChunk]);
+
+    const { isCapturing, startCapture, stopCapture, micPermission } = useAudioCapture(handleAudioChunk);
+
+    // ── Audio playback (WebSocket TTS → speaker) ──
+    const { isPlaying: isAudioPlaying, enqueue: enqueueAudio, clearBuffer: clearAudioBuffer } = useAudioPlayback();
+
+    // Wire audio playback to WebSocket messages
+    useEffect(() => {
+        onAudioDataRef.current = enqueueAudio;
+        return () => { onAudioDataRef.current = null; };
+    }, [onAudioDataRef, enqueueAudio]);
+
     const [showEndDialog, setShowEndDialog] = useState(false);
     const [networkLost, setNetworkLost] = useState(false);
     const [reconnectSeconds, setReconnectSeconds] = useState(180);
 
     const videoRef = useRef(null);
     const streamRef = useRef(null);
-    const timersRef = useRef([]);
 
-    /* ── Timer helpers ── */
-    const addTimer = useCallback((fn, delay) => {
-        const id = window.setTimeout(fn, delay);
-        timersRef.current.push(id);
-        return id;
-    }, []);
-
-    const clearTimers = useCallback(() => {
-        timersRef.current.forEach(clearTimeout);
-        timersRef.current = [];
-    }, []);
-
-    /* ── Camera/mic setup ── */
+    /* ── Camera setup (video only — mic is handled by useAudioCapture) ── */
     useEffect(() => {
         navigator.mediaDevices
-            .getUserMedia({ video: true, audio: true })
+            .getUserMedia({ video: true, audio: false })
             .then(stream => {
                 streamRef.current = stream;
                 if (videoRef.current) videoRef.current.srcObject = stream;
@@ -65,72 +69,80 @@ export default function InterviewPage() {
             .catch(() => { });
         return () => {
             streamRef.current?.getTracks().forEach(t => t.stop());
-            clearTimers();
         };
-    }, [clearTimers]);
+    }, []);
 
-    /* ── Interview state machine ── */
+    /* ── Auto-start/stop audio capture based on interview state ── */
     useEffect(() => {
-        if (state === 'connecting') {
-            addTimer(() => {
-                setState('greeting');
-                setCurrentQuestion(DUMMY_QUESTIONS[0]);
-                setAiSpeaking(true);
-            }, 2000);
+        if (connected && (state === 'waiting' || state === 'listening') && !isCapturing) {
+            startCapture();
+        } else if ((state === 'ended' || !connected) && isCapturing) {
+            stopCapture();
         }
-        if (state === 'greeting') {
-            addTimer(() => {
-                setAiSpeaking(false);
-                setState('waiting');
-                setCountdown(10);
-            }, 3000);
+    }, [state, connected, isCapturing, startCapture, stopCapture]);
+
+    /* ── Navigate to dashboard when interview ends ── */
+    useEffect(() => {
+        if (state === 'ended') {
+            stopCapture();
+            clearAudioBuffer();
+            streamRef.current?.getTracks().forEach(t => t.stop());
+            const timer = setTimeout(() => navigate('/dashboard'), 2500);
+            return () => clearTimeout(timer);
         }
-        if (state === 'waiting') {
-            const interval = window.setInterval(() => {
-                setCountdown(prev => {
-                    if (prev <= 1) { clearInterval(interval); setState('listening'); setElapsed(0); return 0; }
+    }, [state, navigate, stopCapture, clearAudioBuffer]);
+
+    /* ── Detect network loss + 180s countdown ── */
+    const reconnectCountdownRef = useRef(null);
+
+    useEffect(() => {
+        if (!connected && state !== 'connecting' && state !== 'ended') {
+            // Network lost — start 180s countdown
+            setNetworkLost(true);
+            setReconnectSeconds(180);
+            stopCapture();  // Stop mic during disconnect
+
+            reconnectCountdownRef.current = setInterval(() => {
+                setReconnectSeconds(prev => {
+                    if (prev <= 1) {
+                        clearInterval(reconnectCountdownRef.current);
+                        // Timeout expired — navigate to dashboard
+                        navigate('/dashboard');
+                        return 0;
+                    }
                     return prev - 1;
                 });
             }, 1000);
-            timersRef.current.push(interval);
+        } else {
+            // Connection restored or not applicable
+            setNetworkLost(false);
+            setReconnectSeconds(180);
+            if (reconnectCountdownRef.current) {
+                clearInterval(reconnectCountdownRef.current);
+                reconnectCountdownRef.current = null;
+            }
         }
-        if (state === 'listening') {
-            addTimer(() => setPace('too_fast'), 5000);
-            addTimer(() => setPace('good'), 10000);
-            addTimer(() => setPace('too_slow'), 18000);
-            addTimer(() => setState('transitioning'), 22000);
-            const interval = window.setInterval(() => setElapsed(e => e + 1), 1000);
-            timersRef.current.push(interval);
+
+        return () => {
+            if (reconnectCountdownRef.current) {
+                clearInterval(reconnectCountdownRef.current);
+            }
+        };
+    }, [connected, state, navigate, stopCapture]);
+
+    /* ── Text-mode fallback: clicking camera area during 'waiting' starts speaking ── */
+    const handleCameraClick = () => {
+        if (state === 'waiting' && !isCapturing) {
+            notifySpeaking();
         }
-        if (state === 'transitioning') {
-            setAiSpeaking(true);
-            addTimer(() => {
-                setAiSpeaking(false);
-                const nextIdx = questionIndex + 1;
-                if (nextIdx >= DUMMY_QUESTIONS.length) {
-                    setState('ended');
-                } else {
-                    setQuestionIndex(nextIdx);
-                    setCurrentQuestion(DUMMY_QUESTIONS[nextIdx]);
-                    setAiSpeaking(true);
-                    setState('greeting');
-                }
-            }, 2000);
-        }
-        if (state === 'ended') {
-            streamRef.current?.getTracks().forEach(t => t.stop());
-            addTimer(() => navigate('/dashboard'), 2000);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state, questionIndex]);
+    };
 
     const handleEndInterview = () => {
-        clearTimers();
+        wsEndInterview();
+        stopCapture();
+        clearAudioBuffer();
         streamRef.current?.getTracks().forEach(t => t.stop());
-        setState('ended');
         setShowEndDialog(false);
-        // In production: WS sends { type: 'end_interview' }
-        navigate('/dashboard');
     };
 
     const formatTime = secs => {
@@ -187,7 +199,15 @@ export default function InterviewPage() {
             {/* ── Main video area ── */}
             <div style={styles.videoArea}>
                 {/* User camera */}
-                <div style={styles.videoCard}>
+                <div style={{ ...styles.videoCard, cursor: state === 'waiting' ? 'pointer' : 'default' }} onClick={handleCameraClick}>
+                    {/* Hint overlay during waiting state */}
+                    {state === 'waiting' && (
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(0,0,0,0.3)', borderRadius: 24 }}>
+                            <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: 500, padding: '8px 16px', background: 'rgba(0,0,0,0.5)', borderRadius: 100, backdropFilter: 'blur(8px)' }}>
+                                Click to start speaking
+                            </span>
+                        </div>
+                    )}
                     <video
                         ref={videoRef}
                         autoPlay

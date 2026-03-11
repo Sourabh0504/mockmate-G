@@ -3,17 +3,17 @@
  * User info card, stats strip, editable skills + experience.
  */
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Navigation from '../components/layout/Navigation';
 import Footer from '../components/layout/Footer';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useAuth } from '../context/AuthContext';
-import { sessionApi } from '../services/api';
+import { sessionApi, authApi } from '../services/api';
 import {
     ArrowLeft, User, Mail, Calendar, BarChart3, Award,
-    Zap, FileText, Briefcase, Pencil, Check, X, Plus, Trash2
+    Zap, FileText, Briefcase, Pencil, Check, X, Plus, Trash2, Download, AlertTriangle
 } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -40,7 +40,8 @@ function Badge({ children, variant = 'secondary', className = '', onClick }) {
 }
 
 export default function ProfilePage() {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
+    const navigate = useNavigate();
 
     const [sessions, setSessions] = useState([]);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -301,6 +302,75 @@ export default function ProfilePage() {
                             </CardContent>
                         </Card>
                     </div>
+
+                    {/* ── Account Management ── */}
+                    <Card className="mt-6 animate-slide-up border-destructive/20" style={{ animationDelay: '0.5s' }}>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 text-destructive" /> Account Management
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {/* Export All Data */}
+                            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                                <div>
+                                    <p className="font-medium text-sm">Export All Data</p>
+                                    <p className="text-xs text-muted-foreground">Download all your sessions, reports, and resumes as JSON</p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="shrink-0"
+                                    onClick={async () => {
+                                        try {
+                                            const res = await sessionApi.list();
+                                            const data = { user: { name: user?.name, email: user?.email }, sessions: res.data, exported_at: new Date().toISOString() };
+                                            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `mockmate_export_${new Date().toISOString().split('T')[0]}.json`;
+                                            a.click();
+                                            URL.revokeObjectURL(url);
+                                        } catch (err) {
+                                            console.error('Export failed:', err);
+                                            alert('Failed to export data.');
+                                        }
+                                    }}
+                                >
+                                    <Download className="w-3.5 h-3.5 mr-1" /> Export
+                                </Button>
+                            </div>
+
+                            {/* Delete Account */}
+                            <div className="flex items-center justify-between p-3 rounded-lg bg-destructive/5 border border-destructive/10">
+                                <div>
+                                    <p className="font-medium text-sm text-destructive">Delete Account</p>
+                                    <p className="text-xs text-muted-foreground">Permanently delete all data including sessions, reports, and resumes</p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10"
+                                    onClick={() => {
+                                        if (window.confirm('Are you sure you want to delete your account? This will permanently delete ALL your data including sessions, reports, and resumes. This action cannot be undone.')) {
+                                            authApi.deleteAccount()
+                                                .then(() => {
+                                                    logout();
+                                                    navigate('/');
+                                                })
+                                                .catch(err => {
+                                                    console.error('Delete failed:', err);
+                                                    alert('Failed to delete account.');
+                                                });
+                                        }
+                                    }}
+                                >
+                                    <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
                 </div>
             </div>
             <Footer />

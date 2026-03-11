@@ -5,11 +5,10 @@ import {
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
-import { DUMMY_RESUME } from '../data/dummy';
 import {
     Calendar, Clock, ChevronDown, ChevronUp, Download, FileDown,
     MessageSquare, Lightbulb, Target, Trophy, Sparkles, BookOpen,
-    User, GraduationCap, Briefcase, Code, Award,
+    User, GraduationCap, Briefcase, Code, Award, Mic, Brain, Building2,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { sessionApi } from '../services/api';
@@ -161,6 +160,11 @@ export default function ReportModal({ open, onClose, session }) {
                                     {session.role}
                                 </DialogTitle>
                                 <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                                    {session.company && (
+                                        <span className="flex items-center gap-1.5 bg-muted/30 px-2.5 py-1 rounded-full font-medium text-foreground/80">
+                                            <Building2 className="w-3.5 h-3.5" />{session.company}
+                                        </span>
+                                    )}
                                     <span className="flex items-center gap-1.5 bg-muted/30 px-2.5 py-1 rounded-full">
                                         <Calendar className="w-3 h-3" />{formatDate(session.created_at)}
                                     </span>
@@ -189,10 +193,32 @@ export default function ReportModal({ open, onClose, session }) {
 
                         {/* Mini score breakdown */}
                         {scores && (
-                            <div className="flex items-center gap-6 mt-4 pt-4 border-t border-white/[0.06] overflow-x-auto pb-2">
-                                <ScoreRing score={scores.fluency} size={56} strokeWidth={4} label="Fluency" color="neonBlue" />
-                                <ScoreRing score={scores.content_quality} size={56} strokeWidth={4} label="Content" color="neonGreen" />
-                                <ScoreRing score={scores.confidence} size={56} strokeWidth={4} label="Confidence" color="neonPurple" />
+                            <div className="mt-4 pt-4 border-t border-white/[0.06] grid grid-cols-1 sm:grid-cols-3 gap-4 pb-2">
+                                {[
+                                    { label: 'Fluency', value: scores.fluency, icon: Mic },
+                                    { label: 'Content', value: scores.content_quality, icon: Brain },
+                                    { label: 'Confidence', value: scores.confidence, icon: Target },
+                                ].map(s => {
+                                    const barColor = s.value >= 80 ? 'bg-secondary' : s.value >= 60 ? 'bg-primary' : 'bg-accent';
+                                    const valColor = s.value >= 80 ? 'text-secondary' : s.value >= 60 ? 'text-primary' : 'text-accent';
+                                    return (
+                                        <div key={s.label} className="flex flex-col justify-center bg-card/40 border border-white/10 rounded-2xl p-4 relative overflow-hidden shadow-sm">
+                                            <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-glow opacity-[0.02]" />
+                                            <div className="relative space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <s.icon className="w-3.5 h-3.5 text-muted-foreground" />
+                                                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{s.label}</span>
+                                                    </div>
+                                                    <span className={`text-sm font-bold font-poppins ${valColor}`}>{s.value}<span className="text-[10px] text-muted-foreground ml-0.5 font-sans font-normal">/100</span></span>
+                                                </div>
+                                                <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden w-full">
+                                                    <div className={`h-full rounded-full ${barColor} transition-all duration-700`} style={{ width: `${s.value}%` }} />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </DialogHeader>
@@ -261,72 +287,101 @@ export default function ReportModal({ open, onClose, session }) {
 
                             {/* ── Resume Tab ── */}
                             <TabsContent value="resume" className="space-y-2 mt-0">
-                                <p className="text-xs text-muted-foreground mb-4">
-                                    This is the resume used for your interview on {formatDate(displaySession.created_at)}.
-                                </p>
-                                <ResumeSection title={content.resumeSections.personalInfo} icon={User} defaultOpen>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                                        {[
-                                            [content.personalInfoLabels.name, DUMMY_RESUME.personal_info.name],
-                                            [content.personalInfoLabels.email, DUMMY_RESUME.personal_info.email],
-                                            [content.personalInfoLabels.phone, DUMMY_RESUME.personal_info.phone],
-                                            [content.personalInfoLabels.location, DUMMY_RESUME.personal_info.location],
-                                        ].map(([label, val]) => (
-                                            <div key={label} className="bg-muted/20 rounded-lg p-2.5">
-                                                <span className="text-[10px] text-muted-foreground block">{label}</span>
-                                                <span className="text-sm font-medium">{val}</span>
+                                {(() => {
+                                    const resume = displaySession?.structured_resume_snapshot;
+                                    if (!resume) {
+                                        return (
+                                            <div className="text-center py-10 text-muted-foreground text-sm">
+                                                <User className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                                No resume data available for this session.
                                             </div>
-                                        ))}
-                                    </div>
-                                </ResumeSection>
-                                <ResumeSection title={content.resumeSections.education} icon={GraduationCap}>
-                                    {DUMMY_RESUME.education.map((ed, i) => (
-                                        <div key={i} className="bg-muted/20 rounded-lg p-3 text-sm">
-                                            <div className="font-medium">{ed.degree}</div>
-                                            <div className="text-xs text-muted-foreground">{ed.institution} · {ed.year}{ed.gpa && ` · GPA: ${ed.gpa}`}</div>
-                                        </div>
-                                    ))}
-                                </ResumeSection>
-                                <ResumeSection title={content.resumeSections.experience} icon={Briefcase}>
-                                    {DUMMY_RESUME.experience.map((ex, i) => (
-                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-1.5">
-                                            <div className="text-sm font-medium">{ex.title} <span className="text-muted-foreground font-normal">at {ex.company}</span></div>
-                                            <div className="text-[10px] text-muted-foreground">{ex.duration}</div>
-                                            <ul className="space-y-0.5 mt-2">
-                                                {ex.bullets.map((b, j) => (
-                                                    <li key={j} className="text-xs text-muted-foreground flex gap-1.5">
-                                                        <span className="text-primary mt-1 shrink-0">•</span>{b}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    ))}
-                                </ResumeSection>
-                                <ResumeSection title={content.resumeSections.projects} icon={Code}>
-                                    {DUMMY_RESUME.projects.map((p, i) => (
-                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-2">
-                                            <div className="text-sm font-medium">{p.name}</div>
-                                            <div className="text-xs text-muted-foreground">{p.description}</div>
-                                            <div className="flex flex-wrap gap-1">
-                                                {p.tech_stack.map((t) => (
-                                                    <Badge key={t} variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">{t}</Badge>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </ResumeSection>
-                                <ResumeSection title={content.resumeSections.skills} icon={Award}>
-                                    <div className="space-y-2">
-                                        {Object.entries(DUMMY_RESUME.skills).map(([cat, skills]) => (
-                                            <div key={cat} className="bg-muted/20 rounded-lg p-3">
-                                                <div className="text-xs font-semibold text-primary mb-1.5">{cat}</div>
-                                                <div className="flex flex-wrap gap-1">
-                                                    {skills.map((s) => <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>)}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </ResumeSection>
+                                        );
+                                    }
+                                    return (
+                                        <>
+                                            <p className="text-xs text-muted-foreground mb-4">
+                                                This is the resume used for your interview on {formatDate(displaySession.created_at)}.
+                                            </p>
+                                            {resume.personal_info && (
+                                                <ResumeSection title={content.resumeSections.personalInfo} icon={User} defaultOpen>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                                        {[
+                                                            [content.personalInfoLabels.name, resume.personal_info.name],
+                                                            [content.personalInfoLabels.email, resume.personal_info.email],
+                                                            [content.personalInfoLabels.phone, resume.personal_info.phone],
+                                                            [content.personalInfoLabels.location, resume.personal_info.location],
+                                                        ].filter(([, val]) => val).map(([label, val]) => (
+                                                            <div key={label} className="bg-muted/20 rounded-lg p-2.5">
+                                                                <span className="text-[10px] text-muted-foreground block">{label}</span>
+                                                                <span className="text-sm font-medium">{val}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </ResumeSection>
+                                            )}
+                                            {resume.education?.length > 0 && (
+                                                <ResumeSection title={content.resumeSections.education} icon={GraduationCap}>
+                                                    {resume.education.map((ed, i) => (
+                                                        <div key={i} className="bg-muted/20 rounded-lg p-3 text-sm">
+                                                            <div className="font-medium">{ed.degree}</div>
+                                                            <div className="text-xs text-muted-foreground">{ed.institution} · {ed.year}{ed.gpa && ` · GPA: ${ed.gpa}`}</div>
+                                                        </div>
+                                                    ))}
+                                                </ResumeSection>
+                                            )}
+                                            {resume.experience?.length > 0 && (
+                                                <ResumeSection title={content.resumeSections.experience} icon={Briefcase}>
+                                                    {resume.experience.map((ex, i) => (
+                                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-1.5">
+                                                            <div className="text-sm font-medium">{ex.title} <span className="text-muted-foreground font-normal">at {ex.company}</span></div>
+                                                            <div className="text-[10px] text-muted-foreground">{ex.duration}</div>
+                                                            {ex.bullets?.length > 0 && (
+                                                                <ul className="space-y-0.5 mt-2">
+                                                                    {ex.bullets.map((b, j) => (
+                                                                        <li key={j} className="text-xs text-muted-foreground flex gap-1.5">
+                                                                            <span className="text-primary mt-1 shrink-0">•</span>{b}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </ResumeSection>
+                                            )}
+                                            {resume.projects?.length > 0 && (
+                                                <ResumeSection title={content.resumeSections.projects} icon={Code}>
+                                                    {resume.projects.map((p, i) => (
+                                                        <div key={i} className="bg-muted/20 rounded-lg p-3 space-y-2">
+                                                            <div className="text-sm font-medium">{p.name}</div>
+                                                            <div className="text-xs text-muted-foreground">{p.description}</div>
+                                                            {p.tech_stack?.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {p.tech_stack.map((t) => (
+                                                                        <Badge key={t} variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">{t}</Badge>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </ResumeSection>
+                                            )}
+                                            {resume.skills && Object.keys(resume.skills).length > 0 && (
+                                                <ResumeSection title={content.resumeSections.skills} icon={Award}>
+                                                    <div className="space-y-2">
+                                                        {Object.entries(resume.skills).map(([cat, skills]) => (
+                                                            <div key={cat} className="bg-muted/20 rounded-lg p-3">
+                                                                <div className="text-xs font-semibold text-primary mb-1.5">{cat}</div>
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {(Array.isArray(skills) ? skills : [skills]).map((s) => <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>)}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </ResumeSection>
+                                            )}
+                                        </>
+                                    );
+                                })()}
                             </TabsContent>
 
                             {/* ── Summary Tab ── */}
@@ -384,7 +439,42 @@ export default function ReportModal({ open, onClose, session }) {
                                             variant="outline"
                                             size="lg"
                                             className="group border-white/10 hover:border-primary/30 hover:bg-primary/5 transition-all w-full sm:w-auto"
-                                            onClick={() => alert('PDF export coming soon!')}
+                                            onClick={async () => {
+                                                try {
+                                                    const { default: jsPDF } = await import('jspdf');
+                                                    const doc = new jsPDF();
+                                                    const role = displaySession.role || displaySession.target_role || '';
+                                                    const company = displaySession.company || displaySession.company_name || '';
+                                                    let y = 20;
+                                                    doc.setFontSize(20);
+                                                    doc.text('MockMate AI — Interview Report', 14, y); y += 12;
+                                                    doc.setFontSize(11);
+                                                    doc.text(`Role: ${role}    Company: ${company}`, 14, y); y += 7;
+                                                    doc.text(`Date: ${formatDate(displaySession.created_at)}    Score: ${scores?.overall ?? 'N/A'}/100`, 14, y); y += 10;
+                                                    if (report?.summary) {
+                                                        doc.setFontSize(13); doc.text('Summary', 14, y); y += 7;
+                                                        doc.setFontSize(9);
+                                                        const lines = doc.splitTextToSize(report.summary, 180);
+                                                        doc.text(lines, 14, y); y += lines.length * 4.5 + 6;
+                                                    }
+                                                    if (report?.questions?.length) {
+                                                        doc.setFontSize(13); doc.text('Transcript', 14, y); y += 7;
+                                                        report.questions.forEach((q, i) => {
+                                                            if (y > 270) { doc.addPage(); y = 20; }
+                                                            doc.setFontSize(10); doc.setFont(undefined, 'bold');
+                                                            doc.text(`Q${i + 1}: ${q.questionText?.substring(0, 80)}`, 14, y); y += 5;
+                                                            doc.setFont(undefined, 'normal'); doc.setFontSize(9);
+                                                            const aLines = doc.splitTextToSize(`A: ${q.userAnswer?.substring(0, 300) || 'No answer'}`, 180);
+                                                            doc.text(aLines, 14, y); y += aLines.length * 4 + 3;
+                                                            doc.text(`Score: ${q.score}/10   ${q.comment?.substring(0, 100) || ''}`, 14, y); y += 7;
+                                                        });
+                                                    }
+                                                    doc.save(`MockMate_Report_${displaySession.id || 'report'}.pdf`);
+                                                } catch (err) {
+                                                    console.error('PDF export failed:', err);
+                                                    alert('PDF export failed. Please try again.');
+                                                }
+                                            }}
                                         >
                                             <FileDown className="w-5 h-5 mr-2 text-primary group-hover:scale-110 transition-transform" />
                                             {content.downloadPdf}

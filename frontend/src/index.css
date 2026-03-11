@@ -55,6 +55,25 @@
     @apply bg-background text-foreground font-poppins antialiased;
     font-feature-settings: 'cv11', 'ss01';
   }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

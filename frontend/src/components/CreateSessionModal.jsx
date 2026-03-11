@@ -2,7 +2,7 @@
  * CreateSessionModal.jsx — Exact port of Lovable's CreateSessionModal.tsx
  * Uses Radix Dialog, Slider, Select. Calls real sessionApi.create().
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -24,9 +24,10 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
     const [resumes, setResumes] = useState([]);
     const [uploadingResume, setUploadingResume] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
     // Fetch user resumes when modal opens
-    useState(() => {
+    useEffect(() => {
         if (open) {
             resumeApi.list()
                 .then(res => setResumes(res.data))
@@ -39,6 +40,7 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
         if (!file) return;
 
         setUploadingResume(true);
+        setError('');
         const formData = new FormData();
         formData.append('file', file);
 
@@ -47,9 +49,13 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
             setResumes(prev => [res.data, ...prev]);
             setResumeId(res.data.id);
         } catch (err) {
+            const msg = err.response?.data?.detail || 'Failed to upload resume. Please try again.';
+            setError(msg);
             console.error('Failed to upload resume', err);
         } finally {
             setUploadingResume(false);
+            // Reset file input so the same file can be re-selected
+            e.target.value = '';
         }
     };
 
@@ -59,25 +65,28 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
         Hard: { color: 'border-destructive/30 bg-destructive/[0.08] text-destructive', glow: 'shadow-[0_0_12px_hsl(var(--destructive)/0.15)]', icon: '🔴' },
     };
 
-    const canCreate = role && jobDescription.length >= 50;
+    const canCreate = role && jobDescription.length >= 50 && resumeId;
     const jdProgress = Math.min((jobDescription.length / 50) * 100, 100);
 
     const handleSubmit = async () => {
         if (!canCreate) return;
         setLoading(true);
         try {
+            setError('');
             const res = await sessionApi.create({
                 role,
                 company,
-                job_description: jobDescription,
+                jd_text: jobDescription,
                 difficulty,
-                duration_selected: duration[0],
+                duration: duration[0],
                 resume_id: resumeId,
             });
             onSessionCreated(res.data);
             onOpenChange(false);
             setRole(''); setCompany(''); setJobDescription(''); setDifficulty('Moderate'); setDuration([15]); setResumeId(null);
         } catch (err) {
+            const msg = err.response?.data?.detail || 'Failed to create session. Please try again.';
+            setError(msg);
             console.error('Failed to create session', err);
         } finally {
             setLoading(false);
@@ -109,6 +118,13 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
                 <ScrollArea className="flex-1 overflow-y-auto">
                     <div className="px-7 pb-4 space-y-5">
 
+                        {/* Error message */}
+                        {error && (
+                            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+                                {error}
+                            </div>
+                        )}
+
                         {/* Role & Company row */}
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
@@ -123,7 +139,7 @@ export default function CreateSessionModal({ open, onOpenChange, onSessionCreate
 
                         {/* Resume Selection */}
                         <div className="space-y-1.5 pt-2">
-                            <Label htmlFor="resume"><Upload className="w-3.5 h-3.5" /> Resume (Optional)</Label>
+                            <Label htmlFor="resume"><Upload className="w-3.5 h-3.5" /> Resume *</Label>
                             <div className="flex gap-3">
                                 <div className="flex-1">
                                     {resumes.length > 0 ? (

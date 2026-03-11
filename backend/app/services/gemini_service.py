@@ -24,7 +24,7 @@ from app.config import get_settings
 settings = get_settings()
 
 
-def _get_model(model_name: str = "gemini-1.5-flash"):
+def _get_model(model_name: str = "gemini-2.0-flash"):
     """Initialize and return Gemini model. Centralised for easy model switching."""
     genai.configure(api_key=settings.GEMINI_API_KEY)
     return genai.GenerativeModel(model_name)

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.database import connect_db, close_db
 from app.config import get_settings
-from app.routes import auth, resumes, sessions
+from app.routes import auth, resumes, sessions, interview_ws
 
 settings = get_settings()
 
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(resumes.router, prefix="/resumes", tags=["Resumes"])
 app.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
+app.include_router(interview_ws.router, tags=["Interview WebSocket"])
 
 
 @app.get("/", tags=["Health"])

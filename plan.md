@@ -79,15 +79,18 @@ MockMate AI is a GenAI-powered system that conducts **realistic, adaptive mock i
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | ReactJS | Dark-themed, modern, premium UI |
+| Frontend | ReactJS (Vite) | Dark-themed, Tailwind CSS, Radix UI primitives, Lucide React icons |
 | Backend | FastAPI (Python) | REST + WebSocket server |
 | Database | MongoDB | All data stored as JSON documents |
 | AI / LLM | Gemini API | Question gen, evaluation, parsing, summary |
 | STT | Gemini Live API | Real-time speech-to-text, lowest latency |
 | TTS | Gemini Live API | Real-time text-to-speech with natural pacing |
 | Real-time Communication | WebSocket (WSS) | Audio streaming + session events |
-| Auth | JWT | Short expiry tokens |
-| PDF Export | jsPDF or react-pdf | Detailed report download |
+| Auth | JWT (bcrypt) | Short expiry tokens, bcrypt password hashing |
+| PDF Export | jsPDF or react-pdf | Detailed report download (not yet implemented) |
+| UI Components | Radix UI + cva | Dialog, Tabs, Select, Checkbox, Collapsible, Slider, ScrollArea |
+| Styling | Tailwind CSS | HSL CSS variables, glassmorphism, gradient accents |
+| Fonts | Google Fonts | Poppins (primary), Inter (secondary), Montserrat (dates) |
 
 > **Why Gemini Live API for STT & TTS:** Keeps the entire AI pipeline within one ecosystem, reduces integration complexity, and provides real-time streaming with natural voice quality. No need for ElevenLabs or Cartesia.
 
@@ -786,65 +789,59 @@ AI-generated improvement suggestions based on latest session results. Both behav
 
 ## 17. Detailed Report Popup
 
-Triggered by clicking **"Detailed Report"** on a completed session card.
+Triggered by clicking **"View Report"** on a completed session card.
 
-Opens as a large modal/popup with the following content in order:
+Opens as a large modal (`sm:max-w-4xl`) with premium glassmorphism styling.
 
-### 1. Interview Information Header
-- Role title
-- Date and time of interview
-- Duration conducted (actual time, not selected time)
-- Difficulty level
-- JD quality warning (if applicable)
+The report data is fetched dynamically from `/sessions/{id}/report` API endpoint when the modal opens.
 
-### 2. Overall Score
-- Large, prominent numeric score display
+### Header (always visible above tabs)
 
-### 3. Overall Interview Summary
-- 4–5 lines of AI-generated narrative
-- Tone: Professional, constructive
-- Covers: Key strengths demonstrated, key areas for improvement, overall impression
+**Left column:**
+- "Interview Report" badge with Sparkles icon
+- Role title (text-2xl, font-poppins)
+- Metadata pills: Company (Building2 icon, if available) · Date (Calendar icon) · Duration (Clock icon) · Difficulty badge
 
-### 4. AI Improvement Suggestions
-- **Technical suggestions:** Skills or concepts the user should study
-- **Behavioral suggestions:** Communication, confidence, structure improvements
+**Right column — Overall Score Capsule:**
+- Rounded card with score value (text-3xl) + "/100" + progress bar (color-coded by score)
 
-### 5. Stats Block
-- Total questions asked
-- Total questions attempted (answered)
-- Questions skipped (timer expired before user spoke)
+**Below header — Score Breakdown (3 capsule cards):**
+- Fluency (Mic icon), Content (Brain icon), Confidence (Target icon)
+- Each: icon + label (uppercase) + score value "/100" + horizontal progress bar
+- Color-coded: ≥80 green, ≥60 blue, <60 purple
 
-### 6. Full Transcript (Q&A pairs, in order)
+### Tabs (5 tabs)
 
-For EACH question-answer pair:
+#### Tab 1 — Transcript
+- Per-question collapsible cards with: Q number badge, section badge, score badge (/10)
+- Question text, user's answer, Comment card (green), Suggestion card (accent)
+- Expandable "Show Expected Answer" section
 
-```
-Q: [Exact question the AI asked]
+#### Tab 2 — Skill Analysis
+- Progress bars for all skills from `scores.skills` with glow shadows
+- 2-column grid layout
 
-A: [User's transcribed answer — spell-corrected, filler words preserved, authentic]
+#### Tab 3 — Resume Snapshot
+- Collapsible accordion: Personal Info, Education, Experience, Projects, Skills
+- Currently uses dummy data — needs to be wired to session's `structured_resume_snapshot`
 
-💬 Comment: [AI's observation about this specific answer]
+#### Tab 4 — Summary
+- Large SVG score ring + score rating text (Excellent/Good/Fair/Needs Work)
+- AI-generated summary paragraph
+- 2-column suggestion cards: Behavioral (green) + Technical (blue)
 
-💡 Suggestion: [What the user should have included or done differently]
+#### Tab 5 — Export
+- "Download PDF" button (placeholder — shows alert)
+- "Download JSON" button (functional — downloads session + report as JSON blob)
 
-✅ Expected Answer: [JD + Resume aligned ideal answer — 
-                     not generic, tailored to what this candidate 
-                     could realistically have said given their background 
-                     and what this specific JD expects]
-```
+### Report Data Normalization
 
-### 7. Resume Section (Collapsible Dropdown)
-
-- **Collapsed by default** — does not clutter the report
-- When user clicks to expand: shows the **AI-structured, cleaned resume** organized into sections
-- Displays the resume from the session's own stored JSON snapshot (not the current resume file)
-- Organized sections: Education, Experience, Projects, Certifications, Skills
-
-### 8. Export
-
-- **"Download as PDF"** button
-- PDF includes: all report content above in a clean formatted layout
-- Generated using jsPDF or react-pdf
+The frontend normalizes the flat backend response into the expected report structure:
+- `summary_text` → `report.summary`
+- `ai_suggestions_behavioral` → `report.behavioral_suggestions`
+- `ai_suggestions_technical` → `report.technical_suggestions`
+- `scores.skills` → `report.skill_scores`
+- `transcript[]` → `report.questions[]` (mapped with score conversion from /100 to /10 scale)
 
 ---
 
@@ -1049,59 +1046,71 @@ For developer/internal use only. Shows for any session:
 
 ## 23. Development Phases
 
-### Phase 1 — Foundation (Weeks 1–3)
-- [ ] User auth (register, login, JWT)
-- [ ] Resume upload (PDF/DOCX), immediate Gemini parsing, validation
-- [ ] Resume FIFO queue (max 5)
-- [ ] Session creation form + card display
-- [ ] Dashboard UI skeleton (dark theme, 4 sections)
-- [ ] MongoDB schema setup
+### Phase 1 — Foundation (Weeks 1–3) ✅ COMPLETE
+- [x] User auth (register, login, JWT with bcrypt)
+- [x] Resume upload (PDF/DOCX), immediate Gemini parsing, validation
+- [x] Resume FIFO queue (max 5)
+- [x] Session creation form (with company field, slider duration, button-group difficulty)
+- [x] Dashboard UI with dark theme, Tailwind CSS, Radix UI components
+- [x] MongoDB schema setup
+- [x] Public pages (Home, How It Works, About, Contact)
+- [x] Navigation bar (auth-aware, mobile responsive)
+- [x] Profile page
 
-### Phase 2 — Question Bank & Session Creation (Weeks 4–5)
-- [ ] JD quality analysis (Gemini)
-- [ ] JD role classification (technical/managerial)
-- [ ] Module 1 question generation (resume-based, with caps and priority rules)
-- [ ] Module 2+3 question generation (JD-based)
-- [ ] Session status lifecycle management (creating → ready)
+### Phase 2 — Question Bank & Session Creation (Weeks 4–5) ✅ COMPLETE
+- [x] JD quality analysis (Gemini)
+- [x] JD role classification (technical/managerial)
+- [x] Module 1 question generation (resume-based, with caps and priority rules)
+- [x] Module 2+3 question generation (JD-based)
+- [x] Session status lifecycle management (creating → ready)
+- [x] Session card all states (creating, ready, live, completed evaluating, completed scored, interrupted, failed)
 
-### Phase 3 — Live Interview (Weeks 6–8)
-- [ ] WebSocket server setup
+### Phase 3 — Live Interview (Weeks 6–8) ⚠️ PARTIAL
+- [ ] WebSocket server setup (backend)
 - [ ] Gemini Live API integration (STT + TTS)
-- [ ] Interview screen UI (camera, avatar, question display, timers)
-- [ ] Per-question answer cycle (10s/7s/120s timer logic)
-- [ ] Interruption handling
+- [x] Interview screen UI (camera, AI avatar, question display, timers, pace indicator)
+- [x] Per-question answer cycle (10s/7s/120s timer logic — demo state machine)
+- [ ] Real WebSocket-driven answer cycle
+- [ ] Interruption handling (real-time)
 - [ ] "Can you repeat?" detection
 - [ ] Natural transitions and micro-pauses in TTS
-- [ ] Speaking pace visual indicator
+- [x] Speaking pace visual indicator (demo)
 - [ ] Session timer and module transitions
-- [ ] End Call button + confirmation popup
+- [x] End Call button + confirmation popup (Radix Dialog)
 - [ ] Auto-save transcript every 20 seconds
+- [x] Network failure overlay UI (built, not yet wired)
 
-### Phase 4 — Failure Handling & Evaluation (Weeks 9–10)
-- [ ] Network disconnect detection
-- [ ] 180-second reconnect window with countdown
+### Phase 4 — Failure Handling & Evaluation (Weeks 9–10) ⚠️ PARTIAL
+- [ ] Network disconnect detection (WebSocket)
+- [x] 180-second reconnect window with countdown UI
 - [ ] Session resume from interruption point logic
-- [ ] Post-interview routing to dashboard
-- [ ] Evaluation background task (per-question AI + rule scoring)
-- [ ] Overall metrics aggregation (Fluency, Confidence, Content Quality)
-- [ ] Skill analysis scoring with JD-type weight adjustment
-- [ ] Overall summary generation (Gemini)
-- [ ] Animated evaluation progress indicator on card
+- [x] Post-interview routing to dashboard
+- [x] Evaluation background task (per-question AI + rule scoring — backend)
+- [x] Overall metrics aggregation (Fluency, Confidence, Content Quality)
+- [x] Skill analysis scoring with JD-type weight adjustment
+- [x] Overall summary generation (Gemini)
+- [x] Animated evaluation progress indicator on card
 
-### Phase 5 — Detailed Report & Dashboard (Weeks 11–12)
-- [ ] Detailed report popup (all 8 sections)
-- [ ] Per-question expected answer generation
-- [ ] Resume collapsible dropdown in report
-- [ ] PDF export
-- [ ] Section B, C, D on dashboard with real data
-- [ ] Mic/camera pre-interview test screen
-- [ ] JD quality warning in UI
+### Phase 5 — Detailed Report & Dashboard (Weeks 11–12) ⚠️ PARTIAL
+- [x] Detailed report modal (5 tabs: Transcript, Skills, Resume, Summary, Export)
+- [x] Per-question comment, suggestion, and expected answer in transcript tab
+- [x] Resume collapsible dropdown in report (currently uses dummy data)
+- [ ] Wire resume tab to actual session's structured_resume_snapshot
+- [ ] PDF export (button exists, shows placeholder alert)
+- [x] JSON export (functional)
+- [x] Dashboard sidebar: Overall Performance cards, Skill Breakdown bars
+- [x] Dashboard: Achievements section
+- [ ] Dashboard: Wire AI Recommendations to API data (currently hardcoded)
+- [x] Rules & Regulations modal with mic/camera permission checks
+- [x] JD quality warning in session card UI
+- [ ] Mic/camera pre-interview test screen (separate from RulesModal)
+- [x] Custom scrollbar matching site theme
 
 ### Phase 6 — Admin, Demo & Polish (Weeks 13–14)
 - [ ] Admin view at /admin
 - [ ] Demo mode with pre-recorded sample
-- [ ] Privacy: data export, account deletion
-- [ ] Speaking pace final polish
+- [ ] Privacy: data export, account deletion UI (API exists, UI not wired)
+- [ ] Speaking pace — wire to real STT data
 - [ ] Accent/STT correction testing
 - [ ] UI/UX polish pass
 - [ ] Performance optimization

@@ -103,11 +103,21 @@ export default function DashboardPage() {
         { title: 'Consistent', desc: 'Complete 5 interviews', unlocked: completedSessions.length >= 5 },
     ];
 
-    const recommendations = [
-        { title: 'Work on Pacing', desc: 'Try to speak at a consistent pace throughout' },
-        { title: 'Use the STAR Method', desc: 'Structure your behavioral answers clearly' },
-        { title: 'Research the Company', desc: 'Tailor answers to the company\'s values' },
-    ];
+    const recommendations = (() => {
+        const behavioral = latestScored?.ai_suggestions_behavioral || [];
+        const technical = latestScored?.ai_suggestions_technical || [];
+        const all = [
+            ...behavioral.map(s => ({ title: 'Behavioral', desc: s })),
+            ...technical.map(s => ({ title: 'Technical', desc: s })),
+        ];
+        if (all.length > 0) return all.slice(0, 4);
+        // Fallback for no scored sessions
+        return [
+            { title: 'Work on Pacing', desc: 'Try to speak at a consistent pace throughout' },
+            { title: 'Use the STAR Method', desc: 'Structure your behavioral answers clearly' },
+            { title: 'Research the Company', desc: 'Tailor answers to the company\'s values' },
+        ];
+    })();
 
     return (
         <div className="min-h-screen bg-background font-poppins">
