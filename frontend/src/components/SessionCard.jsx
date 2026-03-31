@@ -158,10 +158,10 @@ export default function SessionCard({ session }) {
                             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Evaluating your performance...
                         </div>
                     )}
-                    {session.status === 'ready' && session.jd_quality && ['low', 'medium'].includes(session.jd_quality) && (
+                    {session.status === 'ready' && session.jd_quality_warning && (
                         <div className="flex items-center gap-2 text-xs text-accent bg-accent/5 rounded-xl p-2.5 mt-4 border border-accent/10">
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            JD quality is {session.jd_quality} — add more detail for better results.
+                            {session.jd_quality_message || 'Job description seems brief — add more detail for better results.'}
                         </div>
                     )}
                     {session.status === 'interrupted' && (

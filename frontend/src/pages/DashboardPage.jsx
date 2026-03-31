@@ -2,7 +2,7 @@
  * DashboardPage.jsx — Exact port of Lovable's Dashboard.tsx
  * Uses Tailwind + shared UI primitives (Card, Button, etc.)
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/layout/Navigation';
 import Footer from '../components/layout/Footer';
@@ -12,10 +12,12 @@ import { useAuth } from '../context/AuthContext';
 import { sessionApi } from '../services/api';
 import SessionCard from '../components/SessionCard';
 import CreateSessionModal from '../components/CreateSessionModal';
+import DataRetentionModal from '../components/DataRetentionModal';
 import {
     Award, Mic, Brain, Target, TrendingUp, TrendingDown, BarChart3,
     Trophy, Star, Calendar, ArrowRight, Lightbulb, Plus, Sparkles, Flame, Clock,
 } from 'lucide-react';
+import { demoSessionReport } from '../data/demoSession';
 
 // ── Reusable quick stat strip card ──
 function QuickStat({ icon: Icon, value, label, colorClass }) {
@@ -39,6 +41,12 @@ export default function DashboardPage() {
     const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
+    const [showRetention, setShowRetention] = useState(() => !localStorage.getItem('mm_retention_ack'));
+
+    const handleRetentionAccept = () => {
+        localStorage.setItem('mm_retention_ack', 'true');
+        setShowRetention(false);
+    };
 
     // Greeting
     const firstName = user?.name?.split(' ')[0] || 'there';
@@ -51,42 +59,61 @@ export default function DashboardPage() {
     const completedSessions = sessions.filter(s => s.status === 'completed');
     const scoredSessions = completedSessions.filter(s => s.scores?.overall != null);
     const latestScored = scoredSessions[0];
+    const previousScored = scoredSessions[1] || null;
     const hasScores = !!latestScored?.scores;
     const avgScore = scoredSessions.length > 0
         ? Math.round(scoredSessions.reduce((acc, s) => acc + (s.scores?.overall || 0), 0) / scoredSessions.length)
         : 0;
     const totalMinutes = sessions.reduce((acc, s) => acc + (s.duration_selected || s.duration || 0), 0);
 
+    // Calculate real metric deltas (latest vs previous scored session)
+    const calcDelta = (key) => {
+        if (!previousScored?.scores?.[key]) return 0;
+        return Math.round((latestScored.scores[key] || 0) - (previousScored.scores[key] || 0));
+    };
+
     // Score card metrics
     const metricIcons = [Award, Mic, Brain, Target];
     const metricGradients = ['from-primary to-primary-glow', 'from-secondary to-secondary-glow', 'from-accent to-accent-glow', 'from-primary to-accent'];
     const metricTitles = ['Overall Score', 'Fluency', 'Content Quality', 'Confidence'];
     const metrics = hasScores ? [
-        { title: metricTitles[0], value: latestScored.scores.overall, change: +5, icon: metricIcons[0], gradient: metricGradients[0] },
-        { title: metricTitles[1], value: latestScored.scores.fluency, change: +3, icon: metricIcons[1], gradient: metricGradients[1] },
-        { title: metricTitles[2], value: latestScored.scores.content_quality, change: +8, icon: metricIcons[2], gradient: metricGradients[2] },
-        { title: metricTitles[3], value: latestScored.scores.confidence, change: -2, icon: metricIcons[3], gradient: metricGradients[3] },
+        { title: metricTitles[0], value: latestScored.scores.overall, change: calcDelta('overall'), icon: metricIcons[0], gradient: metricGradients[0] },
+        { title: metricTitles[1], value: latestScored.scores.fluency, change: calcDelta('fluency'), icon: metricIcons[1], gradient: metricGradients[1] },
+        { title: metricTitles[2], value: latestScored.scores.content_quality, change: calcDelta('content_quality'), icon: metricIcons[2], gradient: metricGradients[2] },
+        { title: metricTitles[3], value: latestScored.scores.confidence, change: calcDelta('confidence'), icon: metricIcons[3], gradient: metricGradients[3] },
     ] : [];
 
     const skillScores = latestScored?.scores?.skills || latestScored?.report?.skill_scores;
 
     // Fetch sessions
+    const sessionsRef = useRef(sessions);
+    sessionsRef.current = sessions;
+
     const fetchSessions = useCallback(async () => {
         try {
             const res = await sessionApi.list();
-            setSessions(res.data);
+            const list = res.data;
+            // Always inject the static Demo Session to allow users to explore the report UI freely
+            if (!list.find(s => s.id === 'demo-session')) {
+                list.push(demoSessionReport);
+            }
+            setSessions(list);
         } catch { /* silent */ }
         finally { setLoading(false); }
     }, []);
 
     useEffect(() => {
         fetchSessions();
+    }, [fetchSessions]);
+
+    // Poll every 10s when any session is actively creating or live
+    useEffect(() => {
         const hasActive = sessions.some(s => s.status === 'creating' || s.status === 'live');
         if (hasActive) {
             const id = setInterval(fetchSessions, 10000);
             return () => clearInterval(id);
         }
-    }, [fetchSessions, sessions.length]);
+    }, [sessions, fetchSessions]);
 
     const handleCreateSession = (newSession) => {
         setSessions(prev => [newSession, ...prev]);
@@ -141,11 +168,17 @@ export default function DashboardPage() {
                                 {greeting}, <span className="text-neon-blue">{firstName}</span>
                             </h1>
                         </div>
-                        <Button onClick={() => setCreateOpen(true)} className="group w-full sm:w-auto">
-                            <Plus className="w-4 h-4 mr-2" />
-                            <span className="text-sm">New Practice Session</span>
-                            <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                        </Button>
+                        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                            <Button variant="outline" onClick={() => navigate('/interview/demo-session')} className="w-full sm:w-auto border-primary/50 text-foreground hover:bg-primary/10 transition-colors">
+                                <Sparkles className="w-4 h-4 mr-2 text-primary" />
+                                <span className="text-sm font-semibold">Try Demo</span>
+                            </Button>
+                            <Button onClick={() => setCreateOpen(true)} className="group w-full sm:w-auto shadow-lg shadow-primary/20">
+                                <Plus className="w-4 h-4 mr-2" />
+                                <span className="text-sm">New Practice Session</span>
+                                <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                            </Button>
+                        </div>
                     </div>
 
 
@@ -326,6 +359,7 @@ export default function DashboardPage() {
             </div>
 
             <CreateSessionModal open={createOpen} onOpenChange={setCreateOpen} onSessionCreated={handleCreateSession} />
+            <DataRetentionModal open={showRetention} onAccept={handleRetentionAccept} />
             <Footer />
         </div>
     );

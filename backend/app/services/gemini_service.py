@@ -24,7 +24,7 @@ from app.config import get_settings
 settings = get_settings()
 
 
-def _get_model(model_name: str = "gemini-2.0-flash"):
+def _get_model(model_name: str = "gemini-2.5-flash-lite"):
     """Initialize and return Gemini model. Centralised for easy model switching."""
     genai.configure(api_key=settings.GEMINI_API_KEY)
     return genai.GenerativeModel(model_name)
@@ -45,7 +45,7 @@ def _parse_json_response(text: str) -> dict | list:
 
 # ── Resume Parsing ────────────────────────────────────────────────────────────
 
-async def parse_resume(raw_text: str) -> dict:
+async def parse_resume(raw_text: str, debug_logs: dict = None) -> dict:
     """
     Parse raw resume text into structured JSON sections.
     Returns dict matching StructuredResume schema.
@@ -81,6 +81,8 @@ Rules:
 Resume Text:
 {raw_text}
 """
+    if debug_logs is not None:
+        debug_logs["parse_resume"] = prompt
 
     try:
         response = model.generate_content(prompt)
@@ -115,7 +117,7 @@ Resume Text:
 
 # ── JD Analysis ───────────────────────────────────────────────────────────────
 
-async def analyze_jd_quality(jd_text: str) -> dict:
+async def analyze_jd_quality(jd_text: str, debug_logs: dict = None) -> dict:
     """
     Rate JD quality and detect if it's too vague.
     Returns: { quality_score, warning, message }
@@ -139,6 +141,9 @@ Rules:
 Job Description:
 {jd_text}
 """
+    if debug_logs is not None:
+        debug_logs["analyze_jd_quality"] = prompt
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -147,7 +152,7 @@ Job Description:
         return {"quality_score": 5, "warning": False, "message": "JD quality check unavailable."}
 
 
-async def classify_jd_type(jd_text: str) -> str:
+async def classify_jd_type(jd_text: str, debug_logs: dict = None) -> str:
     """
     Classify JD as 'technical' or 'managerial'.
     Used to adjust skill scoring weights.
@@ -164,6 +169,9 @@ Return ONLY valid JSON: {{"type": "technical"}} or {{"type": "managerial"}}
 Job Description:
 {jd_text}
 """
+    if debug_logs is not None:
+        debug_logs["classify_jd_type"] = prompt
+
     try:
         response = model.generate_content(prompt)
         result = _parse_json_response(response.text)
@@ -174,7 +182,7 @@ Job Description:
 
 # ── Question Bank Generation ──────────────────────────────────────────────────
 
-async def generate_resume_questions(structured_resume: dict, jd_text: str) -> list[dict]:
+async def generate_resume_questions(structured_resume: dict, jd_text: str, debug_logs: dict = None) -> list[dict]:
     """
     Generate Module 1 resume-based questions with caps.
     Caps: Education max 3, Experience max 3, Projects max 3, Certifications max 3.
@@ -223,6 +231,9 @@ Return ONLY valid JSON as an array of objects:
 
 Return ONLY the JSON array. No explanation. No markdown.
 """
+    if debug_logs is not None:
+        debug_logs["generate_resume_questions"] = prompt
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -233,7 +244,7 @@ Return ONLY the JSON array. No explanation. No markdown.
         )
 
 
-async def generate_jd_questions(jd_text: str, structured_resume: dict, num_questions: int = 10) -> list[dict]:
+async def generate_jd_questions(jd_text: str, structured_resume: dict, num_questions: int = 10, debug_logs: dict = None) -> list[dict]:
     """
     Generate Module 2 & 3 JD-based questions.
     These are the primary interview questions (65% of session time).
@@ -270,6 +281,9 @@ Return ONLY valid JSON as an array of objects:
 
 No explanation. No markdown. JSON only.
 """
+    if debug_logs is not None:
+        debug_logs["generate_jd_questions"] = prompt
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -282,7 +296,7 @@ No explanation. No markdown. JSON only.
 
 # ── Answer Evaluation ─────────────────────────────────────────────────────────
 
-async def evaluate_answer(question: str, raw_answer: str, jd_text: str) -> dict:
+async def evaluate_answer(question: str, raw_answer: str, jd_text: str, debug_logs: dict = None) -> dict:
     """
     Evaluate a candidate's answer to an interview question.
     Called on the RAW transcript (before spell correction) to capture natural signals.
@@ -322,6 +336,9 @@ Return ONLY valid JSON:
   "confidence_inference": "<string>"
 }}
 """
+    if debug_logs is not None:
+        debug_logs.setdefault("evaluate_answer", []).append(prompt)
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -334,7 +351,7 @@ Return ONLY valid JSON:
 
 # ── Transcript Spell Correction ───────────────────────────────────────────────
 
-async def spell_correct_transcript(raw_transcript: str) -> str:
+async def spell_correct_transcript(raw_transcript: str, debug_logs: dict = None) -> str:
     """
     Correct only accent/STT-induced spelling errors in the transcript.
 
@@ -359,6 +376,9 @@ STRICT RULES:
 Transcript to correct:
 {raw_transcript}
 """
+    if debug_logs is not None:
+        debug_logs.setdefault("spell_correct_transcript", []).append(prompt)
+
     try:
         response = model.generate_content(prompt)
         return response.text.strip()
@@ -368,7 +388,7 @@ Transcript to correct:
 
 # ── Expected Answer Generation ────────────────────────────────────────────────
 
-async def generate_expected_answer(question: str, jd_text: str, structured_resume: dict) -> str:
+async def generate_expected_answer(question: str, jd_text: str, structured_resume: dict, debug_logs: dict = None) -> str:
     """
     Generate the ideal answer for a question, tailored to:
     - What the JD expects from a candidate in this role
@@ -398,6 +418,9 @@ Question:
 Write the ideal answer this candidate should have given. Be specific and practical.
 Return ONLY the answer text. No labels, no markdown.
 """
+    if debug_logs is not None:
+        debug_logs.setdefault("generate_expected_answer", []).append(prompt)
+
     try:
         response = model.generate_content(prompt)
         return response.text.strip()
@@ -407,7 +430,7 @@ Return ONLY the answer text. No labels, no markdown.
 
 # ── Per-Question Feedback ─────────────────────────────────────────────────────
 
-async def generate_question_feedback(question: str, corrected_answer: str, ai_score: float) -> dict:
+async def generate_question_feedback(question: str, corrected_answer: str, ai_score: float, debug_logs: dict = None) -> dict:
     """
     Generate a comment and improvement suggestion for a specific Q&A pair.
     Called after evaluation is complete.
@@ -431,6 +454,9 @@ Return ONLY valid JSON:
   "suggestion": "<string>"
 }}
 """
+    if debug_logs is not None:
+        debug_logs.setdefault("generate_question_feedback", []).append(prompt)
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -444,6 +470,7 @@ async def generate_interview_summary(
     transcript: list[dict],
     scores: dict,
     jd_text: str,
+    debug_logs: dict = None,
 ) -> dict:
     """
     Generate:
@@ -490,6 +517,9 @@ Return ONLY valid JSON:
   "ai_suggestions_technical": ["<suggestion 1>", "<suggestion 2>", ...]
 }}
 """
+    if debug_logs is not None:
+        debug_logs["generate_interview_summary"] = prompt
+
     try:
         response = model.generate_content(prompt)
         return _parse_json_response(response.text)
@@ -503,7 +533,7 @@ Return ONLY valid JSON:
 
 # ── Follow-up Question Generation (called live during interview) ──────────────
 
-async def generate_followup_question(question: str, answer: str, jd_text: str) -> str:
+async def generate_followup_question(question: str, answer: str, jd_text: str, debug_logs: dict = None) -> str:
     """
     Generate a single follow-up question based on the candidate's answer.
     Used during live interview in Module 2/3 to dig deeper or challenge.
@@ -525,6 +555,9 @@ Generate ONE natural follow-up question to either:
 The follow-up should feel like what a real interviewer would naturally ask next.
 Return ONLY the question text. Nothing else.
 """
+    if debug_logs is not None:
+        debug_logs.setdefault("generate_followup_question", []).append(prompt)
+
     try:
         response = model.generate_content(prompt)
         return response.text.strip()

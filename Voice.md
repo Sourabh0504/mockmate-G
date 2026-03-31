@@ -739,3 +739,48 @@ edge-tts==7.0.2       # Free Microsoft neural TTS (streaming)
 
 > [!IMPORTANT]
 > **The simplest path is to enable billing on Google Cloud** (Option C) — zero code changes. But if budget is truly $0, **Option A (Vosk + Edge-TTS) is the best free stack** and the total ~0.8-2.1s latency is perfectly acceptable for interview pacing where humans naturally take 1-3 seconds between turns.
+
+---
+
+## 9. Executive Summary: The Ultimate Cost-Saving Plan
+
+If the primary goal is to **minimize API costs to absolutely $0** while maintaining an acceptable real-time interview experience, the definitive architecture path is **Architecture Option A (The Full Offline/Free Stack)**.
+
+### The $0 Cost Stack Blueprint:
+1. **Speech-to-Text (STT):** Migrate away from Gemini Live's audio input and implement **Vosk**. 
+   - *Why:* It runs 100% locally on your machine, requires no API keys, processes 16kHz PCM natively, and costs exactly $0 per hour.
+2. **LLM Brain:** Use **Gemini 1.5 Flash** (via the standard Text API, not the Gemini Live API).
+   - *Why:* It is highly cost-efficient, lightning-fast for text generation, and easily handles generating the next question.
+3. **Text-to-Speech (TTS):** Implement **Edge-TTS**.
+   - *Why:* It leverages Microsoft's Edge neural voices for free, streams audio asynchronously back to the WebSocket, and provides a highly professional interviewer persona without the steep $12/1M token cost of Gemini Live audio output.
+
+### Migration Action Items to Save Costs:
+- **Drop `gemini_live_service.py`**: Completely stop using the bidirectional Gemini Live WebSocket. While convenient, it is far too expensive for 30-minute interviews.
+- **Install Local Voice Dependencies**: Run `pip install vosk edge-tts` and download the small 40MB `vosk-model-small-en-us` model.
+- **Update `interview_ws.py`**: Rewrite the WebSocket ingestion loop so that incoming `audio_data` bytes are fed directly into `KaldiRecognizer.AcceptWaveform()`, and generated question strings are piped sequentially into `edge_tts.Communicate.stream()`. 
+
+### How to Reduce Costs While Staying on Gemini Live API
+
+If you decide to remain 100% on the **Gemini Live API** architecture, here are the most aggressive strategies you can implement to shrink the ~$2.52/hr operational cost:
+
+1. **Strict Frontend VAD (Voice Activity Detection):**
+   - *Problem:* Real-time WebSockets continuously stream ambient static/silence when the user is thinking, consuming massive amounts of Input Audio Tokens.
+   - *Solution:* Modify `useAudioCapture.js` to include a local VAD threshold. **Only** trigger `websocket.send(pcm_bytes)` when the user is actively vocalizing. Dropping 50% of dead silence will slash your input costs by exactly 50%.
+2. **Compress System Prompts & Context History:**
+   - *Problem:* The Live API repeatedly factors in the massive initial system prompt (which contains the full JD and Resume) into *every single conversational turn*.
+   - *Solution:* Shrink the resume JSON payload down to bare minimums (array of keywords only). Do not pass full bullet descriptions into the live context.
+3. **Hard-Cap Interview Limits:**
+   - *Solution:* Force the AI to transition to the "Feedback/End" state immediately after 15 minutes or 7 total questions. Set a hard 90-second answer limit on the frontend where the mic automatically mutes to prevent endless rambling.
+4. **Enforce the 'Lite' Flash Models:**
+   - *Solution:* Ensure the WebSocket configuration explicitly binds to `gemini-2.0-flash-lite` (once out of beta) or `gemini-1.5-flash-8b`. These heavily quantized models are mathematically cheaper per audio token than standard `1.5-flash`.
+
+### Operational Costs per Hour: Existing vs Suggested
+
+| Component | Existing Architecture (Gemini Live) | Suggested Architecture ($0 Stack) |
+|-----------|-------------------------------------|-----------------------------------|
+| **STT (Listening)** | ~$1.08 / hr (Audio Input Tokens) | **$0.00** / hr (Vosk Local) |
+| **LLM (Thinking)** | (Included in audio input/output) | **$0.001** / hr (Gemini 1.5 Flash Text) |
+| **TTS (Speaking)** | ~$1.44 / hr (Audio Output Tokens) | **$0.00** / hr (Edge-TTS Microsoft) |
+| **Total Cost** | **~$2.52 per hour** of interviewing | **~$0.00 per hour** |
+
+By executing this exact blueprint, MockMate AI's real-time voice pipeline operational costs will drop from ~$2.52 per interview hour straight to **$0.00**.

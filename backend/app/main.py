@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.database import connect_db, close_db
 from app.config import get_settings
-from app.routes import auth, resumes, sessions, interview_ws
+from app.routes import auth, resumes, sessions, interview_ws, admin, tts_preview
 
 settings = get_settings()
 
@@ -46,6 +46,8 @@ app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(resumes.router, prefix="/resumes", tags=["Resumes"])
 app.include_router(sessions.router, prefix="/sessions", tags=["Sessions"])
 app.include_router(interview_ws.router, tags=["Interview WebSocket"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(tts_preview.router, tags=["TTS Preview"])
 
 
 @app.get("/", tags=["Health"])

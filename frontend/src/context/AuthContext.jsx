@@ -49,8 +49,13 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('mm_user');
     };
 
+    const updateUser = (userData) => {
+        setUser(userData);
+        localStorage.setItem('mm_user', JSON.stringify(userData));
+    };
+
     return (
-        <AuthContext.Provider value={{ user, token, login, logout, loading, isAuthenticated: !!token }}>
+        <AuthContext.Provider value={{ user, token, login, logout, updateUser, loading, isAuthenticated: !!token }}>
             {children}
         </AuthContext.Provider>
     );

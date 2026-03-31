@@ -26,6 +26,7 @@ import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import ProfilePage from './pages/ProfilePage';
 import InterviewPage from './pages/InterviewPage';
+import AdminPage from './pages/AdminPage';
 
 /* ── Route guards ── */
 function ProtectedRoute({ children }) {
@@ -38,6 +39,12 @@ function PublicRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   return user ? <Navigate to="/dashboard" replace /> : children;
+}
+
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  return (user && user.is_admin) ? children : <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
@@ -60,6 +67,7 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/interview/:session_id" element={<ProtectedRoute><InterviewPage /></ProtectedRoute>} />
+          <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
 
           {/* ── 404 ── */}
           <Route path="*" element={<NotFoundPage />} />

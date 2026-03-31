@@ -13,6 +13,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { sessionApi } from '../services/api';
 import { Loader2 } from 'lucide-react';
+import { demoSessionReport } from '../data/demoSession';
 
 const content = {
     tabs: { transcript: 'Transcript', skills: 'Skills', resume: 'Resume', summary: 'Summary', export: 'Export' },
@@ -97,6 +98,10 @@ export default function ReportModal({ open, onClose, session }) {
 
     useEffect(() => {
         if (open && session?.id) {
+            if (session.id === 'demo-session') {
+                setFetchedSession(demoSessionReport);
+                return;
+            }
             setLoading(true);
             sessionApi.getReport(session.id)
                 .then(res => setFetchedSession(res.data))

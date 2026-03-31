@@ -505,8 +505,9 @@ The opener question is NOT just a free pass. Gemini evaluates it against the res
 
 ```
 User speaks into mic
-    → Browser captures audio via MediaRecorder API / WebAudio API
-    → Audio chunks sent via WebSocket to FastAPI backend
+    → Browser captures audio via MediaRecorder API / WebAudio API (`pcm-processor.js`)
+    → **VAD Filter:** Root Mean Square (RMS) volume gate drops silent/ambient chunks natively in the browser, slashing Gemini Live Input Audio costs by ~50%.
+    → Active audio chunks sent via WebSocket to FastAPI backend
     → Backend streams chunks to Gemini Live API (STT)
     → STT returns real-time transcription as text
     → Text stored in session memory (NOT displayed to user)

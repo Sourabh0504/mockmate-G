@@ -35,6 +35,7 @@ export const authApi = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  updateVoice: (data) => api.patch('/auth/voice', data),
   deleteAccount: () => api.delete('/auth/account'),
 };
 
@@ -56,6 +57,12 @@ export const sessionApi = {
   getQuestions: (sessionId) => api.get(`/sessions/${sessionId}`), // questions are embedded in session doc
   end: (sessionId, durationActual) => api.post(`/sessions/${sessionId}/end`, { duration_actual: durationActual }),
   getReport: (sessionId) => api.get(`/sessions/${sessionId}/report`),
+};
+
+// ── Admin ─────────────────────────────────────────────────────────────────────
+export const adminApi = {
+  listAllSessions: (skip = 0, limit = 50) => api.get(`/admin/sessions?skip=${skip}&limit=${limit}`),
+  getSessionDetails: (sessionId) => api.get(`/admin/sessions/${sessionId}`),
 };
 
 export default api;

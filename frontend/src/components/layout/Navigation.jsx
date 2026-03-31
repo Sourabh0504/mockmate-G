@@ -7,11 +7,11 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../ui/button';
 import mockmateLogo from '../../assets/mockmate-logo.svg';
-import { Menu, X, BookOpen, Users, Phone, BarChart3, LogIn, User, LogOut } from 'lucide-react';
+import { Menu, X, BookOpen, Users, Phone, BarChart3, LogIn, User, LogOut, Shield } from 'lucide-react';
 import { navigation as nav } from '../../data/data.js';
 
 const publicIconMap = { '/how-it-works': BookOpen, '/about': Users, '/contact': Phone };
-const authIconMap = { '/dashboard': BarChart3 };
+const authIconMap = { '/dashboard': BarChart3, '/admin': Shield };
 
 export default function Navigation() {
     const [scrolled, setScrolled] = useState(false);
@@ -39,6 +39,9 @@ export default function Navigation() {
     ];
 
     const authLinks = [{ name: 'Dashboard', path: '/dashboard' }];
+    if (user?.is_admin) {
+        authLinks.push({ name: 'Admin', path: '/admin' });
+    }
 
     const navLinks = user ? authLinks : publicLinks;
 

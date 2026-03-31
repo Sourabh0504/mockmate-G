@@ -101,6 +101,7 @@ async def create_session(data: SessionCreate, user_id: str, db, background_tasks
         "ai_suggestions_technical": [],
         "termination_type": None,
         "interruption_point": None,
+        "debug_data": {},
     }
 
     result = await db["sessions"].insert_one(session_doc)
@@ -132,20 +133,21 @@ async def _generate_question_bank_background(
     Updates session status to 'ready' when done.
     """
     try:
+        debug_logs = {}
         # Step 1: Analyze JD quality
-        jd_quality = await gemini_service.analyze_jd_quality(jd_text)
+        jd_quality = await gemini_service.analyze_jd_quality(jd_text, debug_logs=debug_logs)
 
         # Step 2: Classify JD type (technical vs managerial)
-        jd_type = await gemini_service.classify_jd_type(jd_text)
+        jd_type = await gemini_service.classify_jd_type(jd_text, debug_logs=debug_logs)
 
         # Step 3: Generate Module 1 — resume-based questions
-        resume_questions_raw = await gemini_service.generate_resume_questions(structured_resume, jd_text)
+        resume_questions_raw = await gemini_service.generate_resume_questions(structured_resume, jd_text, debug_logs=debug_logs)
 
         # Step 4: Generate Module 2/3 — JD-based questions
         # Number of JD questions scales with session duration
         jd_question_count = max(8, duration // 2)
         jd_questions_raw = await gemini_service.generate_jd_questions(
-            jd_text, structured_resume, num_questions=jd_question_count
+            jd_text, structured_resume, num_questions=jd_question_count, debug_logs=debug_logs
         )
 
         # Step 5: Build structured question bank
@@ -194,6 +196,7 @@ async def _generate_question_bank_background(
                     "jd_quality_message": jd_quality.get("message"),
                     "jd_type": jd_type,
                     "questions": questions,
+                    "debug_data": debug_logs,
                 }
             },
         )
@@ -237,6 +240,51 @@ async def get_session_report(session_id: str, user_id: str, db) -> dict:
     return _format_session_report(session)
 
 
+# ── End Session (REST fallback) ───────────────────────────────────────────────
+
+async def end_session(
+    session_id: str,
+    user_id: str,
+    duration_actual: float | None,
+    db,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    """
+    End a live interview session via REST API.
+    Marks status → 'completed', records actual duration, and queues
+    post-interview evaluation as a background task.
+
+    This is the REST fallback for ending sessions — normally, sessions
+    are ended through the WebSocket by InterviewManager.end_interview().
+    """
+    session = await _get_session_or_404(session_id, user_id, db)
+
+    if session["status"] not in ("live", "ready", "interrupted"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Session cannot be ended (current status: {session['status']}).",
+        )
+
+    update = {
+        "status": "completed",
+        "completed_at": datetime.now(timezone.utc),
+        "termination_type": "manual",
+    }
+    if duration_actual is not None:
+        update["duration_actual"] = round(duration_actual, 2)
+
+    await db["sessions"].update_one(
+        {"_id": ObjectId(session_id)},
+        {"$set": update},
+    )
+
+    # Queue post-interview evaluation if there is a transcript
+    if session.get("transcript"):
+        background_tasks.add_task(evaluate_session, session_id, user_id, db)
+
+    return {"message": "Session ended successfully.", "status": "completed"}
+
+
 # ── Post-Interview Evaluation ─────────────────────────────────────────────────
 
 async def evaluate_session(session_id: str, user_id: str, db):
@@ -254,6 +302,7 @@ async def evaluate_session(session_id: str, user_id: str, db):
     structured_resume = session.get("structured_resume_snapshot", {})
     jd_type = session.get("jd_type", "technical")
     transcript = session["transcript"]
+    debug_data = session.get("debug_data", {})
 
     evaluated_transcript = []
 
@@ -267,7 +316,7 @@ async def evaluate_session(session_id: str, user_id: str, db):
             continue
 
         # 1. AI evaluation (on raw answer)
-        ai_eval = await gemini_service.evaluate_answer(question_text, raw_answer, jd_text)
+        ai_eval = await gemini_service.evaluate_answer(question_text, raw_answer, jd_text, debug_logs=debug_data)
         ai_score = ai_eval.get("ai_score", 0)
 
         # 2. Rule-based scoring
@@ -277,13 +326,13 @@ async def evaluate_session(session_id: str, user_id: str, db):
         final_score = round((0.7 * ai_score) + (0.3 * rule_score), 2)
 
         # 4. Spell correction (AFTER evaluation)
-        corrected_answer = await gemini_service.spell_correct_transcript(raw_answer)
+        corrected_answer = await gemini_service.spell_correct_transcript(raw_answer, debug_logs=debug_data)
 
         # 5. Per-question feedback
-        feedback = await gemini_service.generate_question_feedback(question_text, corrected_answer, ai_score)
+        feedback = await gemini_service.generate_question_feedback(question_text, corrected_answer, ai_score, debug_logs=debug_data)
 
         # 6. Expected answer (JD + resume aligned)
-        expected_answer = await gemini_service.generate_expected_answer(question_text, jd_text, structured_resume)
+        expected_answer = await gemini_service.generate_expected_answer(question_text, jd_text, structured_resume, debug_logs=debug_data)
 
         entry.update({
             "corrected_answer": corrected_answer,
@@ -304,6 +353,7 @@ async def evaluate_session(session_id: str, user_id: str, db):
         transcript=evaluated_transcript,
         scores=scores,
         jd_text=jd_text,
+        debug_logs=debug_data,
     )
 
     # Update session with evaluation results
@@ -316,6 +366,7 @@ async def evaluate_session(session_id: str, user_id: str, db):
                 "summary_text": summary_result.get("summary_text"),
                 "ai_suggestions_behavioral": summary_result.get("ai_suggestions_behavioral", []),
                 "ai_suggestions_technical": summary_result.get("ai_suggestions_technical", []),
+                "debug_data": debug_data,
             }
         },
     )

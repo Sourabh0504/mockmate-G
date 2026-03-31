@@ -11,9 +11,10 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useAuth } from '../context/AuthContext';
 import { sessionApi, authApi } from '../services/api';
+import VoiceSettingsModal from '../components/VoiceSettingsModal';
 import {
     ArrowLeft, User, Mail, Calendar, BarChart3, Award,
-    Zap, FileText, Briefcase, Pencil, Check, X, Plus, Trash2, Download, AlertTriangle
+    Zap, FileText, Briefcase, Pencil, Check, X, Plus, Trash2, Download, AlertTriangle, Mic
 } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -44,6 +45,7 @@ export default function ProfilePage() {
     const navigate = useNavigate();
 
     const [sessions, setSessions] = useState([]);
+    const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
     const [isEditingProfile, setIsEditingProfile] = useState(false);
     const [editName, setEditName] = useState(user?.name || '');
     const [editEmail, setEditEmail] = useState(user?.email || '');
@@ -303,8 +305,30 @@ export default function ProfilePage() {
                         </Card>
                     </div>
 
+                    {/* ── Settings ── */}
+                    <Card className="mt-6 animate-slide-up" style={{ animationDelay: '0.5s' }}>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <Mic className="w-4 h-4 text-primary" /> Application Settings
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                                <div>
+                                    <p className="font-medium text-sm">Interviewer Voice Reference</p>
+                                    <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1">
+                                        Current: <span className="font-semibold text-primary/80">{user?.preferred_voice || 'en-US-Andrew'}</span>
+                                    </p>
+                                </div>
+                                <Button size="sm" variant="outline" onClick={() => setIsVoiceModalOpen(true)}>
+                                    Change Voice
+                                </Button>
+                            </div>
+                        </CardContent>
+                    </Card>
+
                     {/* ── Account Management ── */}
-                    <Card className="mt-6 animate-slide-up border-destructive/20" style={{ animationDelay: '0.5s' }}>
+                    <Card className="mt-6 animate-slide-up border-destructive/20" style={{ animationDelay: '0.6s' }}>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-sm flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4 text-destructive" /> Account Management
@@ -373,6 +397,7 @@ export default function ProfilePage() {
                     </Card>
                 </div>
             </div>
+            <VoiceSettingsModal open={isVoiceModalOpen} onOpenChange={setIsVoiceModalOpen} />
             <Footer />
         </div>
     );

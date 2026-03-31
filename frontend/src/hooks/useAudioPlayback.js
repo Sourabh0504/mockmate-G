@@ -1,18 +1,20 @@
 /**
- * useAudioPlayback.js — Seamless playback of PCM audio chunks from WebSocket.
+ * useAudioPlayback.js — Seamless playback of audio from WebSocket.
  *
- * Receives base64-encoded PCM audio (24kHz, Int16) from the server,
- * buffers and plays it through Web Audio API with gapless stitching.
+ * Supports both:
+ *   - MP3 base64 chunks (from Edge TTS)
+ *   - Raw PCM Int16 24kHz (legacy Gemini Live format)
  *
  * Usage:
- *   const { isPlaying, enqueue, clearBuffer } = useAudioPlayback();
- *   // enqueue(base64String) — add audio chunk to playback queue
+ *   const { isPlaying, enqueueMp3, enqueue, clearBuffer } = useAudioPlayback();
+ *   // enqueueMp3(base64Mp3String) — play Edge TTS MP3 audio
+ *   // enqueue(base64PcmString) — play raw PCM audio (legacy)
  *   // clearBuffer() — stop playback and clear queue (for barge-in)
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const OUTPUT_SAMPLE_RATE = 24000; // Gemini Live outputs at 24kHz
+const LEGACY_PCM_SAMPLE_RATE = 24000; // Only for legacy Gemini Live PCM path
 
 export default function useAudioPlayback() {
     const [isPlaying, setIsPlaying] = useState(false);
@@ -21,46 +23,26 @@ export default function useAudioPlayback() {
     const queueRef = useRef([]); // Queue of AudioBuffers
     const isPlayingRef = useRef(false);
     const nextStartTimeRef = useRef(0);
+    const onEndedCallbackRef = useRef(null); // Called when all audio finishes
 
     // Initialize AudioContext lazily (must be after user interaction)
+    // Use browser default sample rate (typically 48kHz) for best Edge TTS quality
     const getAudioContext = useCallback(() => {
-        if (!audioContextRef.current) {
-            audioContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+        if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+            audioContextRef.current = new AudioContext();
         }
         return audioContextRef.current;
     }, []);
-
-    // Convert base64 PCM Int16 to AudioBuffer
-    const decodeChunk = useCallback((base64Data) => {
-        const ctx = getAudioContext();
-
-        // Decode base64 to raw bytes
-        const binaryStr = atob(base64Data);
-        const len = binaryStr.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-        }
-
-        // Interpret as Int16 PCM
-        const int16 = new Int16Array(bytes.buffer);
-        const numSamples = int16.length;
-
-        // Convert to Float32 for Web Audio
-        const audioBuffer = ctx.createBuffer(1, numSamples, OUTPUT_SAMPLE_RATE);
-        const channelData = audioBuffer.getChannelData(0);
-        for (let i = 0; i < numSamples; i++) {
-            channelData[i] = int16[i] / 32768.0;
-        }
-
-        return audioBuffer;
-    }, [getAudioContext]);
 
     // Play next buffer from queue
     const playNext = useCallback(() => {
         if (queueRef.current.length === 0) {
             isPlayingRef.current = false;
             setIsPlaying(false);
+            // Fire the ended callback when all queued audio is done
+            if (onEndedCallbackRef.current) {
+                onEndedCallbackRef.current();
+            }
             return;
         }
 
@@ -86,10 +68,24 @@ export default function useAudioPlayback() {
         };
     }, [getAudioContext]);
 
-    // Enqueue a base64 PCM chunk for playback
-    const enqueue = useCallback((base64Data) => {
+    // Enqueue MP3 audio (from Edge TTS)
+    const enqueueMp3 = useCallback(async (base64Data) => {
         try {
-            const audioBuffer = decodeChunk(base64Data);
+            const ctx = getAudioContext();
+            if (ctx.state === 'suspended') {
+                await ctx.resume();
+            }
+
+            // Decode base64 to ArrayBuffer
+            const binaryStr = atob(base64Data);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+
+            // Decode MP3 to AudioBuffer using Web Audio API
+            const audioBuffer = await ctx.decodeAudioData(bytes.buffer);
             queueRef.current.push(audioBuffer);
 
             if (!isPlayingRef.current) {
@@ -98,28 +94,60 @@ export default function useAudioPlayback() {
                 playNext();
             }
         } catch (err) {
-            console.error('[AudioPlayback] Failed to decode audio:', err);
+            console.error('[AudioPlayback] Failed to decode MP3:', err);
         }
-    }, [decodeChunk, playNext]);
+    }, [getAudioContext, playNext]);
+
+    // Legacy: Enqueue raw PCM Int16 audio (from Gemini Live)
+    const enqueue = useCallback((base64Data) => {
+        try {
+            const ctx = getAudioContext();
+
+            const binaryStr = atob(base64Data);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+            }
+
+            const int16 = new Int16Array(bytes.buffer);
+            const numSamples = int16.length;
+
+            const audioBuffer = ctx.createBuffer(1, numSamples, LEGACY_PCM_SAMPLE_RATE);
+            const channelData = audioBuffer.getChannelData(0);
+            for (let i = 0; i < numSamples; i++) {
+                channelData[i] = int16[i] / 32768.0;
+            }
+
+            queueRef.current.push(audioBuffer);
+
+            if (!isPlayingRef.current) {
+                isPlayingRef.current = true;
+                setIsPlaying(true);
+                playNext();
+            }
+        } catch (err) {
+            console.error('[AudioPlayback] Failed to decode PCM:', err);
+        }
+    }, [getAudioContext, playNext]);
 
     // Clear all queued audio (for barge-in / interruption)
+    // Suspends context instead of destroying it so future playback still works
     const clearBuffer = useCallback(() => {
         queueRef.current = [];
         nextStartTimeRef.current = 0;
         isPlayingRef.current = false;
         setIsPlaying(false);
 
-        // Stop any currently playing audio by closing and recreating context
-        if (audioContextRef.current) {
-            audioContextRef.current.close();
-            audioContextRef.current = null;
+        if (audioContextRef.current && audioContextRef.current.state === 'running') {
+            audioContextRef.current.suspend();
         }
     }, []);
 
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            if (audioContextRef.current) {
+            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
                 audioContextRef.current.close();
             }
         };
@@ -128,6 +156,8 @@ export default function useAudioPlayback() {
     return {
         isPlaying,
         enqueue,
+        enqueueMp3,
         clearBuffer,
+        onEndedCallbackRef,
     };
 }

@@ -5,26 +5,9 @@
  * handles all incoming messages, and exposes a clean API for the
  * InterviewPage component.
  *
- * Usage:
- *   const ws = useInterviewWS(sessionId);
- *   // ws.state        — 'connecting' | 'greeting' | 'waiting' | 'listening' | 'transitioning' | 'ended'
- *   // ws.question      — current question text
- *   // ws.questionIndex — current question number (0-based)
- *   // ws.totalQuestions — total questions in bank
- *   // ws.countdown     — seconds remaining in 10s initial timer
- *   // ws.elapsed       — seconds elapsed while user is speaking
- *   // ws.aiSpeaking    — boolean, AI is currently speaking
- *   // ws.pace          — 'good' | 'too_fast' | 'too_slow'
- *   // ws.connected     — boolean, WebSocket is connected
- *   // ws.error         — error message if any
- *   // ws.endReason     — reason interview ended (if ended)
- *   // ws.send(msg)     — send a message to the server
- *   // ws.notifySpeaking() — tell server user started speaking
- *   // ws.sendText(text)   — send transcribed text to server
- *   // ws.sendAudioChunk(b64) — send base64 PCM audio to server
- *   // ws.endInterview()   — request interview end
- *   // ws.requestRepeat()  — request question repeat
- *   // ws.onAudioData      — ref to set audio data callback
+ * Voice pipeline:
+ *   TTS: Backend generates Edge TTS MP3 → sends as tts_audio message → frontend plays
+ *   STT: Browser Web Speech API → frontend sends speech_text messages → backend processes
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -50,11 +33,10 @@ export default function useInterviewWS(sessionId) {
     const countdownRef = useRef(null);
     const elapsedRef = useRef(null);
     const stateRef = useRef('connecting');
-    const onAudioDataRef = useRef(null);  // Callback for audio playback
+    const onTtsAudioRef = useRef(null);  // Callback for MP3 TTS audio playback
     const reconnectAttemptsRef = useRef(0);
-    const maxReconnectAttempts = 3;
 
-    // Keep stateRef in sync so the onclose handler always sees the latest state
+    // Keep stateRef in sync
     useEffect(() => {
         stateRef.current = state;
     }, [state]);
@@ -116,13 +98,19 @@ export default function useInterviewWS(sessionId) {
                 if (msg.total_questions) setTotalQuestions(msg.total_questions);
                 break;
 
+            case 'tts_audio':
+                // Edge TTS MP3 audio — forward to playback hook
+                setAiSpeaking(true);
+                if (msg.data && onTtsAudioRef.current) {
+                    onTtsAudioRef.current(msg.data);
+                }
+                break;
+
             case 'start_timer':
                 setAiSpeaking(false);
                 if (msg.timer_type === 'initial') {
                     setState('waiting');
                     startCountdown(msg.seconds || 10);
-                } else if (msg.timer_type === 'silence') {
-                    // Silence timer is tracked server-side
                 }
                 break;
 
@@ -146,20 +134,13 @@ export default function useInterviewWS(sessionId) {
                 setPace(msg.pace || 'good');
                 break;
 
-            case 'audio_data':
-                // Forward TTS audio to playback hook
-                if (msg.data && onAudioDataRef.current) {
-                    onAudioDataRef.current(msg.data);
-                }
-                break;
+
 
             case 'turn_complete':
-                // AI finished speaking — update state
                 setAiSpeaking(false);
                 break;
 
             case 'user_speaking_detected':
-                // VAD auto-detected user speech (no manual click needed)
                 setState('listening');
                 stopTimers();
                 startElapsed();
@@ -174,7 +155,6 @@ export default function useInterviewWS(sessionId) {
                 break;
 
             case 'session_info':
-                // Can update UI with remaining time, etc.
                 break;
 
             case 'error':
@@ -190,7 +170,7 @@ export default function useInterviewWS(sessionId) {
     // ── WebSocket connection ─────────────────────────────────────────────────
 
     const reconnectTimerRef = useRef(null);
-    const MAX_RECONNECT_ATTEMPTS = 36; // 36 * 5s = 180s
+    const MAX_RECONNECT_ATTEMPTS = 36;
 
     const connectWS = useCallback(() => {
         const token = localStorage.getItem('mm_token');
@@ -222,11 +202,9 @@ export default function useInterviewWS(sessionId) {
             console.log(`[WS] Closed: code=${event.code}, reason=${event.reason}`);
             setConnected(false);
 
-            // Use stateRef to get current state (not stale closure value)
             if (stateRef.current !== 'ended') {
                 setError(`Connection lost (code: ${event.code})`);
 
-                // Auto-reconnect every 5s if within 180s window
                 if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
                     console.log(`[WS] Scheduling reconnect attempt ${reconnectAttemptsRef.current + 1}/${MAX_RECONNECT_ATTEMPTS}`);
                     reconnectTimerRef.current = setTimeout(() => {
@@ -234,12 +212,11 @@ export default function useInterviewWS(sessionId) {
                         connectWS();
                     }, 5000);
                 } else {
-                    console.log('[WS] Max reconnect attempts reached (180s)');
                     setError('Connection lost permanently. Redirecting to dashboard...');
                 }
             }
         };
-    }, [sessionId, handleMessage, stopTimers]);
+    }, [sessionId, handleMessage]);
 
     useEffect(() => {
         if (!sessionId) return;
@@ -247,7 +224,6 @@ export default function useInterviewWS(sessionId) {
 
         return () => {
             stopTimers();
-            // Cancel any pending reconnect
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;
@@ -285,8 +261,10 @@ export default function useInterviewWS(sessionId) {
         send({ type: 'repeat_request' });
     }, [send]);
 
-    const sendAudioChunk = useCallback((base64Data) => {
-        send({ type: 'audio_chunk', data: base64Data });
+
+
+    const sendTtsDone = useCallback(() => {
+        send({ type: 'tts_done' });
     }, [send]);
 
     return {
@@ -305,9 +283,9 @@ export default function useInterviewWS(sessionId) {
         send,
         notifySpeaking,
         sendText,
-        sendAudioChunk,
         endInterview,
         requestRepeat,
-        onAudioDataRef,
+        sendTtsDone,
+        onTtsAudioRef,
     };
 }

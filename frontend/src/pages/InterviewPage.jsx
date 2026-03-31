@@ -1,13 +1,15 @@
 /**
  * InterviewPage.jsx — Full-screen AI interview with webcam, AI avatar, and question flow.
  * Uses useInterviewWS hook for real-time WebSocket communication with the backend.
- * Uses useAudioCapture for microphone PCM streaming and useAudioPlayback for AI TTS.
+ * Uses useSpeechRecognition for browser-based STT (free).
+ * Uses useAudioPlayback for Edge TTS MP3 playback (free).
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import useInterviewWS from '../hooks/useInterviewWS';
-import useAudioCapture from '../hooks/useAudioCapture';
+import useDemoInterview from '../hooks/useDemoInterview';
+import useSpeechRecognition from '../hooks/useSpeechRecognition';
 import useAudioPlayback from '../hooks/useAudioPlayback';
 import { Phone, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
@@ -18,38 +20,64 @@ export default function InterviewPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
 
+    const isDemo = session_id === 'demo-session';
+
     // ── WebSocket hook — all interview state comes from here ──
-    const ws = useInterviewWS(session_id);
+    const realWs = useInterviewWS(isDemo ? null : session_id);
+    const demoWs = useDemoInterview(isDemo ? session_id : null);
+    
+    const ws = isDemo ? demoWs : realWs;
     const {
         state, question: currentQuestion, questionIndex, totalQuestions,
         countdown, elapsed, aiSpeaking, pace, connected, error: wsError,
         endReason, endText,
-        notifySpeaking, sendText, sendAudioChunk, endInterview: wsEndInterview, requestRepeat,
-        onAudioDataRef,
+        notifySpeaking, sendText, endInterview: wsEndInterview, requestRepeat,
+        sendTtsDone,
+        onTtsAudioRef,
     } = ws;
 
-    // ── Audio capture (mic → PCM → WebSocket) ──
-    const handleAudioChunk = useCallback((pcmBuffer) => {
-        // Convert ArrayBuffer to base64
-        const bytes = new Uint8Array(pcmBuffer);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        const b64 = btoa(binary);
-        sendAudioChunk(b64);
-    }, [sendAudioChunk]);
+    // ── Audio playback (Edge TTS MP3 → speaker) ──
+    const { isPlaying: isAudioPlaying, enqueueMp3, clearBuffer: clearAudioBuffer, onEndedCallbackRef } = useAudioPlayback();
 
-    const { isCapturing, startCapture, stopCapture, micPermission } = useAudioCapture(handleAudioChunk);
-
-    // ── Audio playback (WebSocket TTS → speaker) ──
-    const { isPlaying: isAudioPlaying, enqueue: enqueueAudio, clearBuffer: clearAudioBuffer } = useAudioPlayback();
-
-    // Wire audio playback to WebSocket messages
+    // Wire TTS audio from WebSocket to playback hook
     useEffect(() => {
-        onAudioDataRef.current = enqueueAudio;
-        return () => { onAudioDataRef.current = null; };
-    }, [onAudioDataRef, enqueueAudio]);
+        onTtsAudioRef.current = enqueueMp3;
+        return () => { onTtsAudioRef.current = null; };
+    }, [onTtsAudioRef, enqueueMp3]);
+
+    // When audio playback finishes, notify backend (tts_done)
+    useEffect(() => {
+        onEndedCallbackRef.current = () => {
+            if (sendTtsDone) sendTtsDone();
+        };
+        return () => { onEndedCallbackRef.current = null; };
+    }, [onEndedCallbackRef, sendTtsDone]);
+
+    // ── Browser Speech Recognition (free STT) ──
+    const handleSpeechStart = useCallback(() => {
+        notifySpeaking();
+    }, [notifySpeaking]);
+
+    const lastSentTextRef = useRef('');
+
+    const handleSpeechResult = useCallback((text, isFinal) => {
+        // Send all final results. Also send interim results if they contain
+        // new text, so the backend has data even if silence timeout fires
+        // before the browser finalizes the segment.
+        if (isFinal) {
+            sendText(text);
+            lastSentTextRef.current = '';
+        } else if (text !== lastSentTextRef.current) {
+            sendText(text);
+            lastSentTextRef.current = text;
+        }
+    }, [sendText]);
+
+    const { isListening, start: startRecognition, stop: stopRecognition, supported: sttSupported } =
+        useSpeechRecognition({
+            onSpeechStart: handleSpeechStart,
+            onResult: handleSpeechResult,
+        });
 
     const [showEndDialog, setShowEndDialog] = useState(false);
     const [networkLost, setNetworkLost] = useState(false);
@@ -58,7 +86,7 @@ export default function InterviewPage() {
     const videoRef = useRef(null);
     const streamRef = useRef(null);
 
-    /* ── Camera setup (video only — mic is handled by useAudioCapture) ── */
+    /* ── Camera setup (video only) ── */
     useEffect(() => {
         navigator.mediaDevices
             .getUserMedia({ video: true, audio: false })
@@ -72,41 +100,42 @@ export default function InterviewPage() {
         };
     }, []);
 
-    /* ── Auto-start/stop audio capture based on interview state ── */
+    /* ── Auto-start/stop speech recognition based on interview state ── */
     useEffect(() => {
-        if (connected && (state === 'waiting' || state === 'listening') && !isCapturing) {
-            startCapture();
-        } else if ((state === 'ended' || !connected) && isCapturing) {
-            stopCapture();
+        // Start recognition when we're waiting/listening AND AI is NOT speaking
+        if (connected && (state === 'waiting' || state === 'listening') && !aiSpeaking && !isListening) {
+            startRecognition();
         }
-    }, [state, connected, isCapturing, startCapture, stopCapture]);
+        // Stop when AI is speaking, ended, or disconnected
+        if ((aiSpeaking || state === 'ended' || !connected) && isListening) {
+            stopRecognition();
+        }
+    }, [state, connected, aiSpeaking, isListening, startRecognition, stopRecognition]);
 
     /* ── Navigate to dashboard when interview ends ── */
     useEffect(() => {
         if (state === 'ended') {
-            stopCapture();
+            stopRecognition();
             clearAudioBuffer();
             streamRef.current?.getTracks().forEach(t => t.stop());
             const timer = setTimeout(() => navigate('/dashboard'), 2500);
             return () => clearTimeout(timer);
         }
-    }, [state, navigate, stopCapture, clearAudioBuffer]);
+    }, [state, navigate, stopRecognition, clearAudioBuffer]);
 
     /* ── Detect network loss + 180s countdown ── */
     const reconnectCountdownRef = useRef(null);
 
     useEffect(() => {
         if (!connected && state !== 'connecting' && state !== 'ended') {
-            // Network lost — start 180s countdown
             setNetworkLost(true);
             setReconnectSeconds(180);
-            stopCapture();  // Stop mic during disconnect
+            stopRecognition();
 
             reconnectCountdownRef.current = setInterval(() => {
                 setReconnectSeconds(prev => {
                     if (prev <= 1) {
                         clearInterval(reconnectCountdownRef.current);
-                        // Timeout expired — navigate to dashboard
                         navigate('/dashboard');
                         return 0;
                     }
@@ -114,7 +143,6 @@ export default function InterviewPage() {
                 });
             }, 1000);
         } else {
-            // Connection restored or not applicable
             setNetworkLost(false);
             setReconnectSeconds(180);
             if (reconnectCountdownRef.current) {
@@ -128,18 +156,11 @@ export default function InterviewPage() {
                 clearInterval(reconnectCountdownRef.current);
             }
         };
-    }, [connected, state, navigate, stopCapture]);
-
-    /* ── Text-mode fallback: clicking camera area during 'waiting' starts speaking ── */
-    const handleCameraClick = () => {
-        if (state === 'waiting' && !isCapturing) {
-            notifySpeaking();
-        }
-    };
+    }, [connected, state, navigate, stopRecognition]);
 
     const handleEndInterview = () => {
         wsEndInterview();
-        stopCapture();
+        stopRecognition();
         clearAudioBuffer();
         streamRef.current?.getTracks().forEach(t => t.stop());
         setShowEndDialog(false);
@@ -199,15 +220,7 @@ export default function InterviewPage() {
             {/* ── Main video area ── */}
             <div style={styles.videoArea}>
                 {/* User camera */}
-                <div style={{ ...styles.videoCard, cursor: state === 'waiting' ? 'pointer' : 'default' }} onClick={handleCameraClick}>
-                    {/* Hint overlay during waiting state */}
-                    {state === 'waiting' && (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5, background: 'rgba(0,0,0,0.3)', borderRadius: 24 }}>
-                            <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: 500, padding: '8px 16px', background: 'rgba(0,0,0,0.5)', borderRadius: 100, backdropFilter: 'blur(8px)' }}>
-                                Click to start speaking
-                            </span>
-                        </div>
-                    )}
+                <div style={styles.videoCard}>
                     <video
                         ref={videoRef}
                         autoPlay
@@ -241,14 +254,12 @@ export default function InterviewPage() {
 
                 {/* AI Avatar */}
                 <div style={styles.avatarCard}>
-                    {/* Glow blob when speaking */}
                     <div style={{
                         ...styles.avatarGlow,
                         opacity: aiSpeaking ? 1 : 0,
                         transition: 'opacity 0.7s ease',
                     }} />
                     <div style={styles.avatarContent}>
-                        {/* Avatar circle */}
                         <div style={{
                             ...styles.avatarRing,
                             border: aiSpeaking ? '2px solid rgba(108,99,255,0.4)' : '2px solid transparent',
@@ -259,7 +270,6 @@ export default function InterviewPage() {
                                 🤖
                             </div>
                         </div>
-                        {/* Waveform when speaking */}
                         {aiSpeaking && (
                             <div style={styles.waveform}>
                                 {[...Array(7)].map((_, i) => (
@@ -277,7 +287,6 @@ export default function InterviewPage() {
                             </div>
                         )}
                     </div>
-                    {/* AI name tag */}
                     <div style={styles.nameTag}>
                         <div style={{ ...styles.nameDot, background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))' }} />
                         <span style={styles.nameText}>MockMate AI</span>
@@ -288,17 +297,15 @@ export default function InterviewPage() {
             {/* ── Floating control bar ── */}
             <div style={styles.controlBar}>
                 <div style={styles.controlInner}>
-                    {/* Mic indicator with animation */}
+                    {/* Mic indicator */}
                     <div style={styles.micIndicator}>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44 }}>
-                            {/* Pulsing rings — only when listening */}
                             {state === 'listening' && (
                                 <>
                                     <span style={styles.micRing1} />
                                     <span style={styles.micRing2} />
                                 </>
                             )}
-                            {/* Mic SVG icon */}
                             <svg
                                 width="22" height="22" viewBox="0 0 24 24" fill="none"
                                 stroke={state === 'listening' ? 'var(--accent-success)' : 'rgba(255,255,255,0.3)'}
@@ -313,7 +320,7 @@ export default function InterviewPage() {
                         </div>
                     </div>
                     <div style={styles.controlDivider} />
-                    {/* End call — proper SVG phone-down icon */}
+                    {/* End call */}
                     <button
                         style={styles.endCallBtn}
                         onClick={() => setShowEndDialog(true)}
@@ -349,7 +356,6 @@ export default function InterviewPage() {
                 </DialogContent>
             </Dialog>
 
-
             {/* ── Network lost overlay ── */}
             {networkLost && (
                 <div style={styles.networkOverlay}>
@@ -367,6 +373,13 @@ export default function InterviewPage() {
                         </div>
                         <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 12 }}>Your progress is being saved.</p>
                     </div>
+                </div>
+            )}
+
+            {/* ── STT not supported warning ── */}
+            {!sttSupported && (
+                <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', background: 'rgba(255,80,80,0.9)', color: '#fff', padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, zIndex: 400 }}>
+                    ⚠️ Speech recognition not supported in this browser. Please use Chrome.
                 </div>
             )}
         </div>
@@ -554,9 +567,6 @@ const styles = {
         padding: 28, maxWidth: 360, width: '100%',
         boxShadow: 'var(--shadow-modal)',
     },
-    dialogTitle: { fontSize: 17, fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' },
-    dialogBody: { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 },
-    dialogFooter: { display: 'flex', gap: 10, justifyContent: 'flex-end' },
     networkOverlay: {
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',

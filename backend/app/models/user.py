@@ -22,11 +22,17 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserUpdateVoice(BaseModel):
+    voice: str
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
     email: str
     created_at: datetime
+    is_admin: bool = False
+    preferred_voice: Optional[str] = "en-US-AndrewMultilingualNeural"
 
     class Config:
         from_attributes = True

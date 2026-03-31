@@ -9,7 +9,7 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 import bcrypt
 
-from app.models.user import UserCreate, UserLogin, UserResponse, TokenResponse
+from app.models.user import UserCreate, UserLogin, UserResponse, TokenResponse, UserUpdateVoice
 from app.utils.jwt_utils import create_access_token
 
 
@@ -28,6 +28,8 @@ def _format_user(user_doc: dict) -> UserResponse:
         name=user_doc["name"],
         email=user_doc["email"],
         created_at=user_doc["created_at"],
+        is_admin=user_doc.get("is_admin", False),
+        preferred_voice=user_doc.get("preferred_voice", "en-US-AndrewMultilingualNeural"),
     )
 
 
@@ -49,6 +51,8 @@ async def register_user(data: UserCreate, db) -> TokenResponse:
         "password_hash": _hash_password(data.password),
         "created_at": datetime.now(timezone.utc),
         "data_retention_consent": False,
+        "is_admin": False,
+        "preferred_voice": "en-US-AndrewMultilingualNeural",
     }
     result = await db["users"].insert_one(user_doc)
     user_doc["_id"] = result.inserted_id
@@ -71,6 +75,18 @@ async def login_user(data: UserLogin, db) -> TokenResponse:
 
     token = create_access_token(str(user["_id"]), user["email"])
     return TokenResponse(access_token=token, user=_format_user(user))
+
+
+async def update_user_voice(user_id: str, data: UserUpdateVoice, db) -> UserResponse:
+    uid = ObjectId(user_id)
+    await db["users"].update_one(
+        {"_id": uid},
+        {"$set": {"preferred_voice": data.voice}}
+    )
+    user = await db["users"].find_one({"_id": uid})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return _format_user(user)
 
 
 async def delete_user_account(user_id: str, db) -> dict:

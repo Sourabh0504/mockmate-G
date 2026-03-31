@@ -71,11 +71,16 @@ class InterviewManager:
         # Transcript
         self.transcript = []
         self.current_answer_chunks = []  # Accumulates STT text chunks for current answer
+        self.silence_gaps = []           # Silence durations (>1.5s gaps between speech chunks)
         self.last_autosave_time = None
 
         # Follow-up tracking (max 2 per topic)
         self.followup_counts = {}  # question_id → count
         self.pending_followup = None  # If set, deliver this instead of next bank question
+
+        # Pending action after next tts_done (event-driven turn management)
+        # Values: None | "start_waiting" | "deliver_question" | "deliver_followup"
+        self.pending_action = None
 
         # Completion tracking
         self.termination_type = None  # "normal" | "manual" | "network_failure"
@@ -218,10 +223,17 @@ class InterviewManager:
         """
         Receive a chunk of STT text for the current answer.
         Updates last_speech_time for silence detection.
+        Tracks silence gaps between speech chunks.
         """
         if text.strip():
+            now = time.time()
+            # Track silence gap (> 1.5s between chunks counts as silence)
+            if self.last_speech_time is not None:
+                gap = now - self.last_speech_time
+                if gap > 1.5:
+                    self.silence_gaps.append(gap)
             self.current_answer_chunks.append(text.strip())
-            self.last_speech_time = time.time()
+            self.last_speech_time = now
 
     def check_silence_timeout(self) -> bool:
         """
@@ -274,7 +286,7 @@ class InterviewManager:
             "answer_duration_sec": round(answer_duration, 2),
             "filler_word_count": filler_count,
             "speech_rate_wps": round(speech_rate_wps, 2),
-            "silence_duration_sec": 0,  # TODO: calculate from audio gaps
+            "silence_duration_sec": round(sum(self.silence_gaps), 2),
             "ai_score": None,      # Filled during evaluation
             "rule_score": None,    # Filled during evaluation
             "final_score": None,   # Filled during evaluation
@@ -287,6 +299,7 @@ class InterviewManager:
 
         # Clear current answer state
         self.current_answer_chunks = []
+        self.silence_gaps = []
         self.answer_start_time = None
         self.last_speech_time = None
         self.state = "transitioning"
