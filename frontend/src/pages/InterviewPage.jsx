@@ -9,7 +9,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import useInterviewWS from '../hooks/useInterviewWS';
 import useDemoInterview from '../hooks/useDemoInterview';
-import useSpeechRecognition from '../hooks/useSpeechRecognition';
+import useAudioCapture from '../hooks/useAudioCapture';
 import useAudioPlayback from '../hooks/useAudioPlayback';
 import { Phone, AlertCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
@@ -34,6 +34,9 @@ export default function InterviewPage() {
         notifySpeaking, sendText, endInterview: wsEndInterview, requestRepeat,
         sendTtsDone,
         onTtsAudioRef,
+        isTtsBusyRef,       // Gate: true while TTS is generating/playing — blocks mic
+        sendAudioChunk,     // Stream PCM chunks to backend (Whisper STT)
+        sendSpeechEnd,      // Signal speech segment end (triggers transcription)
     } = ws;
 
     // ── Audio playback (Edge TTS MP3 → speaker) ──
@@ -53,31 +56,50 @@ export default function InterviewPage() {
         return () => { onEndedCallbackRef.current = null; };
     }, [onEndedCallbackRef, sendTtsDone]);
 
-    // ── Browser Speech Recognition (free STT) ──
-    const handleSpeechStart = useCallback(() => {
-        notifySpeaking();
-    }, [notifySpeaking]);
+    // ── Silence warning banner — Q3:Option A (client-driven 7s countdown) ──
+    const [silenceWarning, setSilenceWarning] = useState(false);
+    const [silenceCountdown, setSilenceCountdown] = useState(7);
+    const silenceIntervalRef = useRef(null);
 
-    const lastSentTextRef = useRef('');
+    const clearSilenceCountdown = useCallback(() => {
+        clearInterval(silenceIntervalRef.current);
+        setSilenceWarning(false);
+        setSilenceCountdown(7);
+    }, []);
 
-    const handleSpeechResult = useCallback((text, isFinal) => {
-        // Send all final results. Also send interim results if they contain
-        // new text, so the backend has data even if silence timeout fires
-        // before the browser finalizes the segment.
-        if (isFinal) {
-            sendText(text);
-            lastSentTextRef.current = '';
-        } else if (text !== lastSentTextRef.current) {
-            sendText(text);
-            lastSentTextRef.current = text;
-        }
-    }, [sendText]);
+    const startSilenceCountdown = useCallback(() => {
+        clearInterval(silenceIntervalRef.current);
+        setSilenceWarning(false);
+        setSilenceCountdown(7);
+        let count = 7;
+        silenceIntervalRef.current = setInterval(() => {
+            count -= 1;
+            setSilenceCountdown(count);
+            if (count <= 5) setSilenceWarning(true);  // Banner appears after 2s of silence
+            if (count <= 0) clearInterval(silenceIntervalRef.current);
+        }, 1000);
+    }, []);
 
-    const { isListening, start: startRecognition, stop: stopRecognition, supported: sttSupported } =
-        useSpeechRecognition({
-            onSpeechStart: handleSpeechStart,
-            onResult: handleSpeechResult,
+    // Clear banner whenever we leave listening state
+    useEffect(() => {
+        if (state !== 'listening') clearSilenceCountdown();
+    }, [state, clearSilenceCountdown]);
+
+    // ── AudioWorklet capture (faster-whisper STT) ──
+    // Demo mode reuses sendText (legacy Web Speech API path inside useDemoInterview)
+    const { isCapturing, start: startCapture, stop: stopCapture } =
+        useAudioCapture({
+            onSpeechStart: notifySpeaking,          // Notify server immediately (UI state)
+            sendAudioChunk: isDemo ? null : sendAudioChunk,   // Stream PCM to backend
+            onSpeechEnd:   isDemo ? null : sendSpeechEnd,     // Trigger Whisper transcription
+            canStartRef:   isTtsBusyRef,            // Block during TTS playback
         });
+
+    // Keep isListening alias for UI compatibility
+    const isListening = isCapturing;
+    const startRecognition = startCapture;
+    const stopRecognition  = stopCapture;
+    const sttSupported     = !!navigator.mediaDevices;
 
     const [showEndDialog, setShowEndDialog] = useState(false);
     const [networkLost, setNetworkLost] = useState(false);
@@ -100,28 +122,28 @@ export default function InterviewPage() {
         };
     }, []);
 
-    /* ── Auto-start/stop speech recognition based on interview state ── */
+    /* ── Auto-start/stop audio capture based on interview state ── */
     useEffect(() => {
-        // Start recognition when we're waiting/listening AND AI is NOT speaking
-        if (connected && (state === 'waiting' || state === 'listening') && !aiSpeaking && !isListening) {
-            startRecognition();
+        // Start capture when waiting or listening AND AI is not speaking
+        if (connected && (state === 'waiting' || state === 'listening') && !aiSpeaking && !isCapturing) {
+            startCapture();
         }
-        // Stop when AI is speaking, ended, or disconnected
-        if ((aiSpeaking || state === 'ended' || !connected) && isListening) {
-            stopRecognition();
+        // Stop when AI speaks, interview ends, or disconnected
+        if ((aiSpeaking || state === 'ended' || !connected) && isCapturing) {
+            stopCapture();
         }
-    }, [state, connected, aiSpeaking, isListening, startRecognition, stopRecognition]);
+    }, [state, connected, aiSpeaking, isCapturing, startCapture, stopCapture]);
 
     /* ── Navigate to dashboard when interview ends ── */
     useEffect(() => {
         if (state === 'ended') {
-            stopRecognition();
+            stopCapture();
             clearAudioBuffer();
             streamRef.current?.getTracks().forEach(t => t.stop());
             const timer = setTimeout(() => navigate('/dashboard'), 2500);
             return () => clearTimeout(timer);
         }
-    }, [state, navigate, stopRecognition, clearAudioBuffer]);
+    }, [state, navigate, stopCapture, clearAudioBuffer]);
 
     /* ── Detect network loss + 180s countdown ── */
     const reconnectCountdownRef = useRef(null);
@@ -130,7 +152,7 @@ export default function InterviewPage() {
         if (!connected && state !== 'connecting' && state !== 'ended') {
             setNetworkLost(true);
             setReconnectSeconds(180);
-            stopRecognition();
+            stopCapture();
 
             reconnectCountdownRef.current = setInterval(() => {
                 setReconnectSeconds(prev => {
@@ -160,7 +182,7 @@ export default function InterviewPage() {
 
     const handleEndInterview = () => {
         wsEndInterview();
-        stopRecognition();
+        stopCapture();
         clearAudioBuffer();
         streamRef.current?.getTracks().forEach(t => t.stop());
         setShowEndDialog(false);
@@ -198,9 +220,9 @@ export default function InterviewPage() {
                         <div style={styles.questionRow}>
                             <p style={styles.questionText}>{currentQuestion}</p>
                             <div style={styles.timerChip}>
-                                {state === 'waiting' && (
-                                    <span style={{ color: 'var(--accent-warning)', fontWeight: 600, fontSize: 12 }}>
-                                        ⏳ {countdown}s
+                                                {state === 'waiting' && (
+                                    <span style={{ color: 'var(--accent-success)', fontWeight: 600, fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        🎤 Listening...
                                     </span>
                                 )}
                                 {state === 'listening' && (
@@ -212,6 +234,12 @@ export default function InterviewPage() {
                                     <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Processing...</span>
                                 )}
                             </div>
+                        </div>
+                    )}
+                    {/* Silence Warning Banner — Q3:Option A */}
+                    {silenceWarning && state === 'listening' && (
+                        <div style={styles.silenceWarning}>
+                            🎤 Will ask the next question in <strong style={{ color: 'var(--accent-warning)' }}>{silenceCountdown}s</strong> — speak now to continue.
                         </div>
                     )}
                 </div>
@@ -414,7 +442,18 @@ const styles = {
         padding: '12px 18px',
         minHeight: 52,
         display: 'flex',
-        alignItems: 'center',
+        flexDirection: 'column',
+        gap: 6,
+    },
+    silenceWarning: {
+        background: 'rgba(251,191,36,0.08)',
+        border: '1px solid rgba(251,191,36,0.25)',
+        borderRadius: 10,
+        padding: '6px 14px',
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.8)',
+        textAlign: 'center',
+        marginTop: 2,
     },
     connectingRow: {
         display: 'flex', alignItems: 'center', gap: 8,

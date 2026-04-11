@@ -82,6 +82,10 @@ class InterviewManager:
         # Values: None | "start_waiting" | "deliver_question" | "deliver_followup"
         self.pending_action = None
 
+        # Audio buffer — accumulates raw float32 PCM bytes from browser AudioWorklet.
+        # Cleared after each Whisper transcription and after tts_done.
+        self.audio_buffer: bytes = b""
+
         # Completion tracking
         self.termination_type = None  # "normal" | "manual" | "network_failure"
         self.interruption_point = None

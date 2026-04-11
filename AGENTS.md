@@ -1,6 +1,6 @@
 > [!IMPORTANT]
 > **MANDATORY CHANGELOG RULE — ENFORCED ON EVERY TASK**
-> Before starting any work: read `plan.md`, `AGENTS.md`, and `frontend.md`.
+> Before starting any work: read `plan.md`, `AGENTS.md`, `frontend.md`, and `prompts.md`.
 > After completing any work (code change, file creation, bug fix, config change): add an entry to **`CHANGES.md`** at the **very top** (most recent first).
 > Format:
 > ```
@@ -9,6 +9,15 @@
 > - Description of what changed and why
 > ```
 > **Never skip the changelog update. It is not optional.**
+
+> [!IMPORTANT]
+> **MANDATORY PROMPT SYNC RULE — ENFORCED ON EVERY PROMPT CHANGE**
+> Whenever you edit any prompt string inside `backend/app/services/gemini_service.py`, you **MUST** also update the corresponding section in **`prompts.md`**:
+> - Bump the version number (v1 → v2, etc.)
+> - Copy the new prompt template into a new versioned block
+> - Describe what changed and why
+> - Move the old version into the History block for that prompt
+> `prompts.md` is the single source of truth for all prompt history and optimization notes.
 
 # AGENTS.md — MockMate AI Codebase Guide
 
@@ -34,6 +43,7 @@ MockmateGemini/
 ├── plan.md               # Complete product specification — READ BEFORE CODING
 ├── AGENTS.md             # This file — codebase guide for AI agents
 ├── CHANGES.md            # Changelog — update on every meaningful change
+├── prompts.md            # Prompt engineering registry — update on EVERY prompt change
 ├── idea.md               # Original idea notes (reference only)
 │
 ├── backend/              # FastAPI Python backend
@@ -162,14 +172,15 @@ FRONTEND_URL=          # Frontend URL for CORS
 
 ## How to Add a New Feature
 
-1. Read `plan.md`, `AGENTS.md`, and `frontend.md` before starting
+1. Read `plan.md`, `AGENTS.md`, `frontend.md`, and `prompts.md` before starting
 2. Add/update Pydantic models in `app/models/`
 3. Add service logic in `app/services/`
 4. Add route in `app/routes/` (thin — just calls service)
 5. Register route in `app/main.py` if new router
 6. Add API call helper in `frontend/src/services/api.js`
 7. Build the UI component/page
-8. **Update `CHANGES.md` at the TOP** — use format `## YYYY-MM-DD HH:MM IST` with `### Added / Changed / Fixed / Removed` sub-sections. Most recent entry always at the top.
+8. **If you added or modified any Gemini prompt:** update `prompts.md` with the new version, old version history, and reason for change.
+9. **Update `CHANGES.md` at the TOP** — use format `## YYYY-MM-DD HH:MM IST` with `### Added / Changed / Fixed / Removed` sub-sections. Most recent entry always at the top.
 
 ---
 
@@ -201,3 +212,4 @@ npm run dev
 - Do not create a new DB connection outside `database.py`
 - Do not hardcode secrets or API keys
 - Do not forget to update `CHANGES.md`
+- Do not edit a prompt in `gemini_service.py` without updating `prompts.md`

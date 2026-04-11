@@ -212,6 +212,7 @@ export default function useDemoInterview(sessionId) {
         sendTtsDone,
         onTtsAudioRef: { current: null },
         onAudioDataRef: { current: null },
+        isTtsBusyRef: { current: false },  // Demo never blocks STT
     };
 }
 

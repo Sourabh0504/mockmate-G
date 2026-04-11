@@ -4,7 +4,51 @@
 > Format for each entry: `## YYYY-MM-DD HH:MM IST` then `### Added / Changed / Fixed / Removed` sub-sections.
 > Every code change, file creation, bug fix, or config update must be logged here immediately.
 
+## 2026-04-04 19:52 IST
+### Added
+- **`prompts.md`** — Created the Prompt Engineering Registry at the project root. Documents all 11 Gemini prompts used in `gemini_service.py`, organized by function. Each entry includes: purpose, criticality level (🔴/🟡/🟢), known failure modes, optimization ideas, and a versioned prompt history block. This is the single source of truth for prompt iteration and optimization.
+
+### Changed
+- **`AGENTS.md`** — Added mandatory Prompt Sync Rule (second alert block at top): any edit to a prompt in `gemini_service.py` must be reflected in `prompts.md` with a bumped version number and change description. Added `prompts.md` to: the pre-read list, the repository structure map, step 8 of "How to Add a New Feature", and the "Do Not" list.
+
+## 2026-04-04 20:35 IST
+### Fixed
+- **Bug 1 — 10s wait after greeting before first question (`interview_ws.py`)**: Changed `pending_action` from `"start_waiting"` to `"deliver_question"` on both fresh-start and resume greeting paths. Now the first question is delivered immediately after the greeting TTS ends, not after a 10-second wait for the user to speak.
+- **Bug 2 — Visible countdown timer in `waiting` state (`InterviewPage.jsx`)**: Changed the `⏳ {countdown}s` chip to `🎤 Listening...` The server-side 10s timeout (for users who never speak) is still active but no longer shown as a visible countdown — the experience now feels instant and natural.
+
+### Added
+- **`backend/app/services/whisper_service.py`** (NEW): Local faster-whisper STT service. Loads `small` model at startup — GPU (CUDA float16) primary, CPU (int8) fallback. Async `transcribe(pcm_float32_bytes)` runs in thread pool executor. Handles Indian accents significantly better than Chrome's Web Speech API and works in all browsers.
+- **`frontend/public/pcm-processor.js`** (REWRITE): AudioWorklet VAD at 16kHz. RMS gate (threshold 0.008), 0.6s silence detection. Posts `speaking_started`, `audio` (ArrayBuffer), and `silence_detected` events to main thread. Replaces the old version that was deleted.
+- **`frontend/src/hooks/useAudioCapture.js`** (NEW): Mic capture hook using AudioWorklet. Initializes AudioContext at 16kHz, loads pcm-processor worklet, accumulates Float32 chunks and flushes as base64 every 200ms. Uses `canStartRef` to gate audio during TTS (echo prevention). Replaces `useSpeechRecognition`.
+
+### Changed
+- **`interview_ws.py`**: Added `audio_chunk` handler (buffer float32 PCM bytes + keep silence timer fresh), `speech_end` handler (transcribe via Whisper in async Task), `_transcribe_and_process()` coroutine (Whisper → repeat check → `receive_speech_text`). Clears `audio_buffer` on `tts_done`. Imports `whisper_service` at module level (warms model at startup). Added 1s natural pause before Q0 in `_deliver_next_question`. `speech_text` kept as legacy fallback for demo mode.
+- **`interview_manager.py`**: Added `self.audio_buffer: bytes = b""` field.
+- **`useInterviewWS.js`**: Added `sendAudioChunk(base64)` and `sendSpeechEnd()` helpers, exposed in return object.
+- **`InterviewPage.jsx`**: Replaced `useSpeechRecognition` import with `useAudioCapture`. Wired `sendAudioChunk` and `sendSpeechEnd` from WS hook. Removed dead `handleSpeechStart`/`handleSpeechResult` callbacks.
+- **`requirements.txt`**: Added `faster-whisper>=1.0.0` and `numpy>=1.24.0`.
+
+
+### Fixed
+- **P1 — STT Echo Feedback Loop (`useInterviewWS.js`, `useSpeechRecognition.js`, `InterviewPage.jsx`)**: Added `isTtsBusyRef` in `useInterviewWS.js` — set `true` when first `tts_audio` chunk arrives, `false` when `tts_done` is sent. Exported as `isTtsBusyRef` and passed as `canStartRef` to `useSpeechRecognition`. Recognition's `start()` and auto-restart both block when `canStartRef.current === true`, preventing the mic from capturing the AI's own voice.
+- **P1 — Duplicate STT Text in Transcript (`InterviewPage.jsx`)**: Removed interim result sends from `handleSpeechResult`. Now only calls `sendText(text)` when `isFinal === true` (Q1:Option A). Eliminates doubled/noisy transcript e.g. *"I worked I worked on React projects"*.
+- **P2 — TTS Deadlock (`useInterviewWS.js`)**: Added 10s fallback `setTimeout` that force-sends `tts_done` if audio playback or `tts_stream_done` never arrive, preventing the interview from freezing permanently.
+
+### Added
+- **P2 — Edge TTS Progressive Streaming (Q2:Option A) (`edge_tts_service.py`, `interview_ws.py`, `useInterviewWS.js`)**: Added `stream_tts()` async generator to `edge_tts_service.py`. Refactored `_speak()` in `interview_ws.py` to stream each raw MP3 chunk as a separate `tts_audio` WebSocket message as it arrives (~150-300ms first audio vs 1-2s before). Added `tts_stream_done` message type — client now sends `tts_done` only after BOTH `tts_stream_done` received AND audio queue is empty (coordinated by `_trySendTtsDone` in `useInterviewWS.js`).
+- **P2 — Edge TTS Timeout Guard (`interview_ws.py`)**: Wrapped `_do_stream()` inside `asyncio.wait_for(timeout=10.0)`. Always sends `tts_stream_done` in `finally` block so the turn advances even on timeout or error.
+- **P2 — Silence Warning Banner (Q3:Option A) (`InterviewPage.jsx`)**: Client-driven 7-second countdown banner. After each final STT result, a local interval starts counting down. Banner *"🎤 Will ask the next question in Xs — speak now to continue."* appears after 2s of silence. Resets on each new final result. Auto-clears when state leaves `listening`.
+
+### Changed
+- **`useSpeechRecognition.js`**: Added `canStartRef` parameter. Both `start()` and the 100ms auto-restart check `canStartRef?.current !== true` before launching recognition. `lastProcessedIndexRef` now resets only on explicit `stop()` calls, not on every `onstart`.
+- **`useDemoInterview.js`**: Added `isTtsBusyRef: { current: false }` to return object — demo mode never blocks STT.
+- **`edge_tts_service.py`**: Added `stream_tts()` async generator. `text_to_speech()` retained for `tts_preview` route.
+- **WebSocket protocol comment (`interview_ws.py`)**: Updated to document new `tts_stream_done` message and finals-only STT contract.
+
+---
+
 ## 2026-03-26 01:03 IST
+
 ### Changed
 - **Minimalist VoiceSettingsModal UI**: Refined the `VoiceSettingsModal` based on a clean, modern design aesthetic. Increased overall padding, softened border active states with `bg-primary/5`, separated filter dimensions with cleaner `User` and `Globe` icons, and unified the responsive modal footer structure for a high-quality Vercel-like feel without intrusive keyframe animations. Made Voice capsule items extremely compact by placing description inline.
 

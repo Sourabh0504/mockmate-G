@@ -21,14 +21,8 @@ DEFAULT_VOICE = "en-US-AndrewMultilingualNeural"
 
 async def text_to_speech(text: str, voice: str = DEFAULT_VOICE) -> bytes:
     """
-    Convert text to MP3 audio using Microsoft Edge TTS.
-
-    Args:
-        text: The text to convert to speech.
-        voice: The voice to use (default: Andrew, professional male).
-
-    Returns:
-        MP3 audio bytes.
+    Convert text to MP3 audio using Microsoft Edge TTS (buffered).
+    Used by tts_preview route. For live interview use stream_tts() instead.
     """
     communicate = edge_tts.Communicate(text, voice)
     audio_buffer = io.BytesIO()
@@ -40,6 +34,23 @@ async def text_to_speech(text: str, voice: str = DEFAULT_VOICE) -> bytes:
     audio_bytes = audio_buffer.getvalue()
     logger.debug(f"[Edge TTS] Generated {len(audio_bytes)} bytes for: {text[:60]}...")
     return audio_bytes
+
+
+async def stream_tts(text: str, voice: str = DEFAULT_VOICE):
+    """
+    Async generator that yields raw MP3 audio chunks as they arrive from Edge TTS.
+
+    Enables progressive streaming — first chunk arrives in ~150-300ms instead of
+    buffering the entire MP3 before sending. Each yielded value is raw bytes.
+
+    Usage:
+        async for chunk in stream_tts("Hello world"):
+            send_to_client(base64.b64encode(chunk))
+    """
+    communicate = edge_tts.Communicate(text, voice)
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            yield chunk["data"]
 
 
 async def list_voices() -> list[dict]:

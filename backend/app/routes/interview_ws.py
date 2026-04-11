@@ -5,14 +5,16 @@ Handles the real-time communication loop between the frontend and the
 InterviewManager state machine.
 
 Voice pipeline (100% free):
-  TTS: Edge TTS (Microsoft, free) — generates MP3 audio on server
-  STT: Web Speech API (browser, free) — transcribes speech on client
+  TTS: Edge TTS (Microsoft, free) — streams MP3 chunks to client progressively
+  STT: faster-whisper (local) — server-side transcription of VAD-gated PCM audio
+       streamed from browser AudioWorklet at 16kHz.
 
 Protocol:
   Client → Server:
-    { "type": "speech_text", "text": "transcribed text" }           # Browser STT result
-    { "type": "user_speaking" }                                     # User started speaking
-    { "type": "tts_done" }                                          # Client finished playing TTS audio
+    { "type": "user_speaking" }                                     # VAD: speech started (for UI)
+    { "type": "audio_chunk", "data": "<base64 float32 PCM>" }      # Raw audio during speech
+    { "type": "speech_end" }                                        # VAD: silence detected
+    { "type": "tts_done" }                                          # Client finished playing TTS
     { "type": "end_interview" }
     { "type": "repeat_request" }
 
@@ -20,7 +22,8 @@ Protocol:
     { "type": "greeting", "text": "...", "question_index": 0, ... }
     { "type": "question", "text": "...", "question_id": "...", ... }
     { "type": "transition", "text": "..." }
-    { "type": "tts_audio", "data": "<base64 MP3>" }                 # Edge TTS audio
+    { "type": "tts_audio", "data": "<base64 MP3 chunk>" }           # One or more chunks per utterance
+    { "type": "tts_stream_done" }                                   # All chunks sent for this utterance
     { "type": "start_timer", "timer_type": "initial|silence", "seconds": N }
     { "type": "listening" }
     { "type": "answer_finalized", "reason": "...", ... }
@@ -45,6 +48,7 @@ from app.config import get_settings
 from app.services.interview_manager import InterviewManager
 from app.services import edge_tts_service
 from app.services import session_service
+from app.services import whisper_service  # Warm model at startup
 
 logger = logging.getLogger("interview_ws")
 
@@ -69,19 +73,39 @@ async def _authenticate_ws(token: str, db) -> dict | None:
 
 async def _speak(websocket: WebSocket, text: str, voice: str = "en-US-AndrewMultilingualNeural"):
     """
-    Generate Edge TTS audio and send it to the client.
-    The client will play the MP3 and send 'tts_done' when finished.
+    Stream Edge TTS audio chunks progressively to the client.
+
+    Protocol:
+      - Sends multiple { type: "tts_audio", data: "<base64 MP3 chunk>" } messages
+        as chunks arrive from Edge TTS (~150-300ms to first chunk).
+      - Always sends { type: "tts_stream_done" } when finished (even on error/timeout),
+        so the client can advance the turn regardless.
+
+    The client sends { type: "tts_done" } only after BOTH:
+      1. tts_stream_done received
+      2. Audio playback queue is empty
     """
+    async def _do_stream():
+        async for chunk in edge_tts_service.stream_tts(text, voice):
+            b64_chunk = base64.b64encode(chunk).decode("ascii")
+            await websocket.send_json({
+                "type": "tts_audio",
+                "data": b64_chunk,
+            })
+
     try:
-        audio_bytes = await edge_tts_service.text_to_speech(text, voice)
-        b64_audio = base64.b64encode(audio_bytes).decode("ascii")
-        await websocket.send_json({
-            "type": "tts_audio",
-            "data": b64_audio,
-        })
-        logger.debug(f"[TTS] Sent {len(audio_bytes)} bytes for: {text[:60]}...")
+        await asyncio.wait_for(_do_stream(), timeout=10.0)
+        logger.debug(f"[TTS] Stream complete for: {text[:60]}")
+    except asyncio.TimeoutError:
+        logger.error(f"[TTS] Streaming timed out for: {text[:60]}")
     except Exception as e:
-        logger.error(f"[TTS] Failed to generate audio: {e}", exc_info=True)
+        logger.error(f"[TTS] Streaming error: {e}", exc_info=True)
+    finally:
+        # Always signal stream end so the client turn advances
+        try:
+            await websocket.send_json({"type": "tts_stream_done"})
+        except Exception:
+            pass
 
 
 @router.websocket("/ws/interview/{session_id}")
@@ -170,12 +194,14 @@ async def interview_websocket(
             )
 
             await websocket.send_json(resume_msg)
-            manager.pending_action = "start_waiting"
+            # After greeting TTS → deliver the next question (not wait for user to speak)
+            manager.pending_action = "deliver_question"
             await _speak(websocket, resume_msg["text"], manager.preferred_voice)
         else:
             greeting = await manager.start()
             await websocket.send_json(greeting)
-            manager.pending_action = "start_waiting"
+            # After greeting TTS → deliver Q0 (not wait for user to speak)
+            manager.pending_action = "deliver_question"
             await _speak(websocket, greeting["text"], manager.preferred_voice)
 
         # ── Step 6: Main interview loop ───────────────────────────────────────
@@ -254,16 +280,38 @@ async def _handle_client_message(
     msg_type = msg.get("type")
 
     if msg_type == "user_speaking":
-        # User started speaking (from browser STT)
+        # VAD detected speech start — switch to listening immediately for UI responsiveness
         if manager.state == "waiting":
             response = await manager.user_started_speaking()
             await websocket.send_json(response)
 
+    elif msg_type == "audio_chunk":
+        # Raw float32 PCM chunk from browser AudioWorklet (base64 encoded)
+        if manager.state in ("waiting", "listening"):
+            # First chunk while waiting → switch to listening
+            if manager.state == "waiting":
+                response = await manager.user_started_speaking()
+                await websocket.send_json(response)
+
+            # Accumulate audio bytes + keep silence timer fresh
+            raw = msg.get("data", "")
+            if raw:
+                manager.audio_buffer += base64.b64decode(raw)
+            manager.last_speech_time = time.time()  # Prevent premature 7s timeout
+
+    elif msg_type == "speech_end":
+        # VAD detected silence — transcribe the accumulated audio segment
+        if manager.state == "listening" and manager.audio_buffer:
+            audio_bytes = manager.audio_buffer
+            manager.audio_buffer = b""  # Clear buffer for next segment
+            asyncio.create_task(
+                _transcribe_and_process(websocket, manager, audio_bytes)
+            )
+
     elif msg_type == "speech_text":
-        # Receive transcribed text from browser Web Speech API
+        # Legacy fallback: browser STT text (kept for demo mode compatibility)
         text = msg.get("text", "")
         if text and manager.state == "listening":
-            # Check for repeat request
             if manager.check_repeat_request(text):
                 logger.info(f"[WS] Repeat request detected: {text}")
                 manager.current_answer_chunks = []
@@ -284,6 +332,7 @@ async def _handle_client_message(
 
     elif msg_type == "tts_done":
         # Client finished playing TTS audio — AI done speaking
+        manager.audio_buffer = b""   # Discard any stale audio that arrived during TTS
         await websocket.send_json({"type": "turn_complete"})
 
         # Execute pending action (event-driven turn management)
@@ -357,6 +406,12 @@ async def _deliver_next_question(
 
     q_text = question_msg.get("text", "")
     manager.pending_action = "start_waiting"
+
+    # 1s natural pause before the very first question (after greeting).
+    # Only Q0 with no answers yet — gives human-like conversational pacing.
+    if question_msg.get("question_index", -1) == 0 and len(manager.transcript) == 0:
+        await asyncio.sleep(1.0)
+
     await _speak(websocket, q_text, manager.preferred_voice)
     # Timer will start when client sends 'tts_done' after audio playback
 
@@ -375,6 +430,58 @@ async def _handle_answer_transition(
     await websocket.send_json(transition)
     await _speak(websocket, transition["text"], manager.preferred_voice)
 
+
+# ── Whisper Transcription ────────────────────────────────────────────────────
+
+async def _transcribe_and_process(
+    websocket: WebSocket,
+    manager: InterviewManager,
+    audio_bytes: bytes,
+):
+    """
+    Transcribe a PCM audio segment via faster-whisper and feed result back
+    into the answer accumulation pipeline.
+
+    Called as an asyncio.Task — does not block the main message loop.
+    Each call handles one speech segment (VAD-gated chunk from the browser).
+    Multiple segments accumulate into current_answer_chunks before finalization.
+    """
+    try:
+        text = await whisper_service.transcribe(audio_bytes)
+        if not text.strip():
+            return
+
+        if manager.state != "listening":
+            return  # State changed while we were transcribing — discard
+
+        # Detect repeat request
+        if manager.check_repeat_request(text):
+            logger.info(f"[WS] Repeat request from Whisper: {text}")
+            manager.current_answer_chunks = []
+            question = manager.get_current_question()
+            if question:
+                q_text = question["question_text"]
+                manager.pending_action = "start_waiting"
+                await websocket.send_json({
+                    "type": "question",
+                    "text": q_text,
+                    "question_id": question["id"],
+                    "question_index": manager.current_question_index,
+                    "is_repeat": True,
+                })
+                await _speak(websocket, f"I'll repeat the question: {q_text}", manager.preferred_voice)
+            return
+
+        # Feed transcription into the answer accumulator
+        manager.receive_speech_text(text)
+        logger.debug(f"[WS] Whisper segment added: '{text[:60]}'")
+
+    except Exception as e:
+        logger.error(f"[WS] _transcribe_and_process error: {e}", exc_info=True)
+
+
+
+# ── Timer Monitor ─────────────────────────────────────────────────────────────
 
 async def _monitor_timers(
     websocket: WebSocket,
